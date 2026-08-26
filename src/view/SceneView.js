@@ -86,6 +86,24 @@ function _loadAsm(view) {
  * renderer keeps a "detail bubble" around the camera focus and streams hulls in
  * and out of it. Everything outside is still fully simulated; it just isn't drawn.
  */
+/**
+ * Cloud COVERAGE (how much of the sky has cloud in it, 0..1) to the cloud
+ * shader's THRESHOLD (the density level above which cloud exists).
+ *
+ * These are opposite senses, and the weather system was feeding coverage
+ * straight into the threshold. A clear day asked for 0.16 and got a threshold of
+ * 0.16, which is almost solid overcast; a gale asked for 0.95, the threshold
+ * clamped at its 0.85 ceiling, and the sky came out CLOUDLESS. Every weather
+ * state in the game has been rendering as its own opposite, which is why a
+ * forced gale produced a clear blue sky with heavy swell under it.
+ *
+ * The field sits mostly between about 0.15 and 0.75, so that is the useful
+ * threshold range to map into, inverted.
+ */
+function coverageToThreshold(coverage) {
+  return 0.78 - Math.max(0, Math.min(1, coverage)) * 0.62;
+}
+
 export class SceneView {
   constructor(renderPipeline, camDirector, world) {
     this.pipeline = renderPipeline;
@@ -177,7 +195,10 @@ export class SceneView {
   }
 
   setSeaState(ss) {
-    this.ocean.setSeaState(0.55 + ss * 0.26);
+    // One mapping, in one place — see OceanField.setSeaState. This used to apply
+    // its own linear curve while the weather loop applied a different one, so
+    // the sea had two unrelated ideas of what a given sea state looked like.
+    this.ocean.setSeaState(ss);
   }
 
   setWeatherLook({ fog, zenith, horizon, coverage, rain = 0, exposure }) {
@@ -185,7 +206,7 @@ export class SceneView {
     const u = this.sky.sky.material.uniforms;
     if (zenith) u.uZenithColor.value.set(zenith);
     if (horizon) u.uHorizonColor.value.set(horizon);
-    if (coverage !== undefined) u.uCloudCoverage.value = coverage;
+    if (coverage !== undefined) u.uCloudCoverage.value = coverageToThreshold(coverage);
     this.ocean.setRain(rain);
   }
 
@@ -379,7 +400,7 @@ export class SceneView {
       const s = world.weatherSys.state;
       const u = this.sky.sky.material.uniforms;
       const k = Math.min(1, dt * 0.9);
-      u.uCloudCoverage.value += (s.coverage - u.uCloudCoverage.value) * k;
+      u.uCloudCoverage.value += (coverageToThreshold(s.coverage) - u.uCloudCoverage.value) * k;
       this._wxZen = this._wxZen || new THREE.Color(s.zenith);
       this._wxHor = this._wxHor || new THREE.Color(s.horizon);
       this._wxFog = this._wxFog || new THREE.Color(s.fog);
@@ -391,11 +412,7 @@ export class SceneView {
       this.fogColor.copy(this._wxFog);
       this.ocean.setFogColor(this.fogColor);
       this.ocean.uniforms.uHorizonColor.value.copy(this._wxHor);
-      // Wave amplitude has to be a real function of sea state, and it has to
-      // reach. A Douglas 6 rendering at Douglas 3 amplitude — which is what a
-      // linear 0.55 + 0.26*ss produced at the top of the scale — makes the whole
-      // weather system invisible in the one frame that is supposed to show it.
-      this.ocean.setSeaState(0.42 + Math.pow(s.seaState / 6, 1.35) * 2.1);
+      this.ocean.setSeaState(s.seaState);
       this.ocean.setRain(s.rain);
       this.ocean.setVisibility(s.visNm * 1852);
       // Hand the four nearest squall cells to the cloud shader, in render space.

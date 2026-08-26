@@ -1317,8 +1317,26 @@ export class OceanField {
     this.uniforms.uDetailLevel.value = levels[q] ?? 0.75;
   }
 
-  setSeaState(amp) {
-    this.uniforms.uWaveAmp.value = Math.max(0.35, Math.min(2.6, amp));
+  /**
+   * Wave amplitude from a DOUGLAS SEA STATE, not from a raw multiplier.
+   *
+   * There were two callers passing two different ad-hoc formulas, and both of
+   * them bottomed out around 0.8 — which put five metres of peak-to-trough on a
+   * sea state 1. Once flat calm already looks like a rough day, a gale has
+   * nowhere left to go, and an art review correctly reported that forcing sea
+   * state 6 changed nothing. The whole weather system was invisible because its
+   * output range was compressed into the top third of the scale.
+   *
+   * Douglas significant wave heights are roughly 0.1 / 0.3 / 0.9 / 1.9 / 3.3 /
+   * 5.0 m for states 1 to 6, and peak-to-trough runs about twice that. This
+   * shader's amplitude is a multiplier on the base Gerstner set, measured at
+   * about 6.6 m of peak-to-trough per unit, so a quadratic ramp to 1.6 lands the
+   * whole scale where it should be — glassy at 1, and genuinely dangerous at 6.
+   */
+  setSeaState(douglas) {
+    const ss = Math.max(0, Math.min(8, douglas));
+    const amp = 0.05 + Math.pow(ss / 6, 2.0) * 1.55;
+    this.uniforms.uWaveAmp.value = Math.max(0.04, Math.min(2.6, amp));
   }
   get seaState() { return this.uniforms.uWaveAmp.value; }
   setRain(v) { this.uniforms.uRain.value = v; }
