@@ -917,7 +917,21 @@ void main() {
   // which is what makes the shadow read as a shadow rather than as a stain. The
   // shadow map still handles what the analytic test cannot know about — aircraft,
   // ordnance, terrain — and the analytic hull shade handles the ships.
-  float hullShadow = min(getShadowMask(), hullShade);
+  // The analytic hull shadow alone — NOT gated on getShadowMask().
+  //
+  // getShadowMask() reads a receiveShadow uniform that three.js sets for its
+  // own material types. This is a ShaderMaterial and does not declare it, so the
+  // value the shader reads is undefined; in practice it came back false and the
+  // mask returned zero for every water pixel in the frame. min(0, hullShade) is
+  // zero everywhere, which does not draw a shadow — it flattens the entire sea
+  // to the shadowed value uniformly, so nothing has a shadow and the whole ocean
+  // is simply darker. That is exactly what an art review saw: no cast shadow at
+  // 30 degrees of sun elevation, on water that was too dark everywhere.
+  //
+  // The analytic term above needs none of that machinery: it walks the air
+  // column from this fragment toward the sun and tests it against the hull's own
+  // box, using uniforms the ocean already has.
+  float hullShadow = hullShade;
   // Amplitude. Measured on frame captures, the shadow under a hull was darkening
   // the water by about eighteen percent — visible if you were told to look for
   // it, invisible otherwise. A real hull shadow on a sunlit sea is the darkest
