@@ -268,8 +268,19 @@ void main() {
   vWorldPos = worldPos.xyz;
   vEdge = radial;
 
+  // Crest steepness, as the tangent frame's deviation from flat.
+  //
+  // The 0.55 subtracted here was a dead constant: a Gerstner surface at any
+  // amplitude this game produces has a steepness well under it, so the term
+  // clamped to zero on every vertex, at every sea state, always. Whitecaps have
+  // therefore never rendered once in this project — which is exactly what an
+  // art review found when it forced a gale and got a sea with no breaking
+  // crests anywhere on it.
+  //
+  // No bias, and a gain that puts the result in the range the break threshold
+  // downstream actually tests against.
   float steep = length(tangent - vec3(1.0,0.0,0.0)) + length(binormal - vec3(0.0,0.0,1.0));
-  vFoamFactor = clamp(steep - 0.55 + vHullWake * 0.8, 0.0, 1.8);
+  vFoamFactor = clamp(steep * 1.7 + vHullWake * 0.8, 0.0, 1.8);
 
   float distToCam = length(uCamPos - worldPos.xyz);
   vFresnelBoost = smoothstep(800.0, 40.0, distToCam);
@@ -759,6 +770,10 @@ void main() {
     if (uIsland[i].z < 1.0) continue;
     vec2 rel = vWorldPos.xz - uIsland[i].xy;
     float d = length(rel);
+    // Out of range of this island: nothing below can contribute, and the two
+    // octave stacks it would run are not free. Most water in this game is
+    // nowhere near land, so this skips almost every pixel almost every frame.
+    if (d > uIsland[i].z * 2.2) continue;
     // Break the circle: the shoal has to follow the island's plan shape, and a
     // perfectly round ring of turquoise around a lumpy island is the tell.
     float ang = atan(rel.y, rel.x);
@@ -777,7 +792,8 @@ void main() {
       + fbm(vWorldPos.xz * 0.0022) * 6.0);
     shore = max(shore, band * sets * smoothstep(0.0, 1.0, uWaveAmp));
   }
-  shore *= 0.45 + 0.55 * fbm(vWorldPos.xz * 0.35 - uTime * 0.5);
+  // Only break the surf line up where there IS a surf line.
+  if (shore > 0.001) shore *= 0.45 + 0.55 * fbm(vWorldPos.xz * 0.35 - uTime * 0.5);
 
   // ── whitecaps ────────────────────────────────────────────────────────────
   // A wave breaks when its crest steepness passes a limit, and what you get is a
@@ -787,18 +803,54 @@ void main() {
   // So: a hard threshold for "is this crest breaking", multiplied by two octaves
   // of noise at very different scales to break the result into patches, plus a
   // dissolving tail so the foam persists on the back of the crest.
-  float breakLimit = mix(1.02, 0.56, clamp((uWaveAmp - 0.5) / 1.3, 0.0, 1.0));
+  // Where a crest starts to break.
+  //
+  // This threshold is compared against wave steepness, and it was calibrated
+  // against the OLD amplitude scale, which never went below about 0.8. Putting
+  // the Douglas scale on a physical footing dropped the whole range — sea state 1
+  // is now 0.09 rather than 0.81 — so a threshold that starts at 1.02 is never
+  // reached at any sea state the game actually produces, and the sea had no
+  // whitecaps in a full gale. An art review reported exactly that.
+  //
+  // Recalibrated to the amplitude range that now exists: nothing breaks on a
+  // calm, and a gale is covered in breaking crests.
+  float breakLimit = mix(0.92, 0.30, clamp((uWaveAmp - 0.12) / 1.35, 0.0, 1.0));
   float crest = smoothstep(breakLimit, breakLimit + 0.30, vFoamFactor);
-  float capPatch = smoothstep(0.46, 0.80, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
-    * smoothstep(0.34, 0.78, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
-    // A third, very large scale: whole areas of sea that are simply breaking
-    // more than the areas next to them.
-    * (0.20 + 0.80 * smoothstep(0.35, 0.75, fbm(vWorldPos.xz * 0.0022 + 91.0)));
-  float fizz = 0.45 + 0.55 * smoothstep(0.35, 0.85, noise(vWorldPos.xz * 3.2 - uTime * 0.9));
+
+  // DETAIL BY DISTANCE.
+  //
+  // Everything below is fine structure inside the foam — which patches of sea
+  // are breaking, the fizz on a crest, the streaks lying downwind. It is worth
+  // a great deal at fifty metres and literally nothing at two kilometres, where
+  // one pixel spans more sea than the largest of these features. The shader was
+  // paying for all of it on every water pixel in the frame regardless, and the
+  // ocean is most of the frame: measured with GPU timer queries it was 27.7 ms
+  // of a 50 ms frame, the single most expensive thing in the game.
+  //
+  // The test is on distance, so it is spatially coherent — a whole band of the
+  // screen takes the same side of the branch, which is what makes a branch in a
+  // fragment shader cheap rather than catastrophic.
+  float capPatch, fizz, streakFoam;
+  if (dist < 2600.0) {
+    capPatch = smoothstep(0.46, 0.80, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
+      * smoothstep(0.34, 0.78, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
+      // A third, very large scale: whole areas of sea that are simply breaking
+      // more than the areas next to them.
+      * (0.20 + 0.80 * smoothstep(0.35, 0.75, fbm(vWorldPos.xz * 0.0022 + 91.0)));
+    fizz = 0.45 + 0.55 * smoothstep(0.35, 0.85, noise(vWorldPos.xz * 3.2 - uTime * 0.9));
+    // Streaks of dissipated foam lying in the troughs downwind of a break.
+    streakFoam = smoothstep(0.55, 1.0, fbm(vWorldPos.xz * 0.09 + uTime * 0.02))
+      * smoothstep(breakLimit * 0.72, breakLimit, vFoamFactor) * 0.22;
+  } else {
+    // Far field: one cheap octave standing in for the whole stack. Averaged over
+    // a pixel that covers hundreds of metres, that is what the detailed version
+    // converges to anyway.
+    float coarse = smoothstep(0.38, 0.78, noise(vWorldPos.xz * 0.055 + uTime * 0.035));
+    capPatch = 0.24 + 0.62 * coarse;
+    fizz = 0.85;
+    streakFoam = 0.0;
+  }
   float whitecap = crest * capPatch * fizz;   // NB: 'patch' is a GLSL reserved word
-  // Streaks of dissipated foam lying in the troughs downwind of a break.
-  float streakFoam = smoothstep(0.55, 1.0, fbm(vWorldPos.xz * 0.09 + uTime * 0.02))
-    * smoothstep(breakLimit * 0.72, breakLimit, vFoamFactor) * 0.22;
 
   // Whitecap foam and hull-wake foam are DIFFERENT MATERIALS and must not share
   // a colour. A breaking crest is a thin, brilliant, short-lived thing; a bow
@@ -810,11 +862,16 @@ void main() {
   float capMask = clamp(max(whitecap, streakFoam), 0.0, 1.0) * mix(0.05, 1.0, contactKill);
   // Two scales of breakup: a coarse one that dissolves the wake's outline so it
   // never reads as a hard-edged slab, and a fine one for the churn inside it.
-  float wakeBreak = (0.35 + 0.65 * fbm(vWorldPos.xz * 0.055 + uTime * 0.07))
-    * (0.55 + 0.45 * fbm(vWorldPos.xz * 0.9 + uTime * 0.4));
+  // Four more octave stacks that only mean anything where there IS foam from a
+  // hull. Away from a ship they are multiplied by zero, so computing them is
+  // pure waste — and away from a ship is almost the whole ocean.
+  float wakeBreak = 1.0, bowBreak = 1.0;
+  if (hullFoam + bowFoam + collarFoam > 0.001) {
+    wakeBreak = (0.35 + 0.65 * fbm(vWorldPos.xz * 0.055 + uTime * 0.07))
+      * (0.55 + 0.45 * fbm(vWorldPos.xz * 0.9 + uTime * 0.4));
+    bowBreak = 0.55 + 0.45 * fbm(vWorldPos.xz * 0.6 + uTime * 0.55);
+  }
   float wakeMask = clamp(hullFoam * wakeBreak, 0.0, 1.0);
-
-  float bowBreak = 0.55 + 0.45 * fbm(vWorldPos.xz * 0.6 + uTime * 0.55);
   // The collar is freshly entrained air right against the plating, so it is the
   // brightest white in the frame and it does NOT get the bow wave's breakup —
   // it is continuous by nature.
