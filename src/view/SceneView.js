@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { SkySystem } from '../core/sky.js';
 import { OceanField, WIND_DIR } from '../core/ocean.js';
 import { CloudLayer } from '../core/CloudLayer.js';
+import { bakeCloudField } from '../core/CloudField.js';
 import { RainField } from '../core/Rain.js';
 
 const _rainVp = new THREE.Vector2();
@@ -116,6 +117,15 @@ export class SceneView {
     this.ocean.setFogColor(this.fogColor);
 
     // The cumulus deck is geometry, not sky box — see CloudLayer.
+    // Bake the cloud density field once, then hand the same texture to
+    // everything that samples it — the deck, the sky dome and the sea's cloud
+    // shadows all read the identical field, so they stay in register with each
+    // other for free. This replaces roughly a hundred noise evaluations per
+    // lookup with one bilinear fetch.
+    this.cloudField = bakeCloudField(this.renderer, 2048);
+    this.ocean.uniforms.uCloudField.value = this.cloudField;
+    this.sky.sky.material.uniforms.uCloudField.value = this.cloudField;
+
     this.clouds = new CloudLayer(this.ocean.uniforms);
     this.rain = new RainField(this.ocean.uniforms);
     this.scene.add(this.rain.mesh);

@@ -14,6 +14,7 @@ export const SkyShader = {
     uHorizonColor: { value: new Color(0xaecbdd) },
     uSunColor: { value: new Color(0xfff2d6) },
     uCloudCoverage: { value: 0.40 },
+    uCloudField: { value: null },
     uCloudiness: { value: 0.95 },
     uCloudColorLit: { value: new Color(0xf4f7fb) },
     uCloudColorShadow: { value: new Color(0x394b60) },
@@ -265,6 +266,10 @@ export const SkyShader = {
 export const CLOUD_FIELD_GLSL = /* glsl */`
 uniform float uCloudCoverage;
 uniform float uCloudiness;
+uniform sampler2D uCloudField;
+#define CLOUD_TILE 16.0
+// Bake is 2048 texels across CLOUD_TILE uv, and uv = metres * 0.00026.
+#define CLOUD_TEXEL_M 30.05
 
 float cf_hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -319,22 +324,54 @@ float cf_billow(vec2 p) {
  * polygon with straight edges. This ramps smoothly through the coverage
  * threshold instead, so the shadow has a real penumbra.
  */
+/*
+ * Both forms are now a single texture fetch.
+ *
+ * The field they used to evaluate — four five-octave stacks plus a billow fold,
+ * twenty-four lattice lookups — is baked into uCloudField at startup (see
+ * CloudField.js): red is the density, green the coverage modulation. The
+ * raymarch asks for this eight to ten times per pixel over a full screen, and
+ * computing it analytically was measured at 224 ms of a 232 ms frame in the
+ * fleet-level view. A bilinear fetch is roughly two orders of magnitude cheaper
+ * and, being mipmapped, is also properly filtered when a pixel covers kilometres
+ * of cloud — which the analytic version never was.
+ */
+vec2 cf_field(vec2 uv) {
+  return texture2D(uCloudField, uv / CLOUD_TILE).rg;
+}
+
+/*
+ * Explicit-LOD form, for use inside the raymarch.
+ *
+ * Automatic mip selection is only defined under UNIFORM control flow, and the
+ * march is the opposite of that: its trip count varies per pixel and it breaks
+ * early when the ray saturates, so neighbouring pixels run different numbers of
+ * iterations. The derivatives the hardware needs are then undefined, and what it
+ * actually does is resolve them per 2x2 quad against whatever its neighbours
+ * happened to be doing — which drew the cloud deck as a grid of hard screen-
+ * aligned blocks. Passing the level in explicitly, computed once before the loop
+ * where the flow is still uniform, removes the guesswork entirely.
+ */
+vec2 cf_fieldLod(vec2 uv, float lod) {
+  return texture2DLodEXT(uCloudField, uv / CLOUD_TILE, lod).rg;
+}
+
+float cf_shapeLod(vec2 uv, float thr, float lod) {
+  vec2 f = cf_fieldLod(uv, lod);
+  float t = clamp(thr + (f.g - 0.5) * 0.42, -0.15, 0.85);
+  return clamp((f.r - t) / (1.0 - t), 0.0, 1.0);
+}
+
 float cf_softShape(vec2 uv, float thr) {
-  float cover = cf_fbm3(uv * 0.13 + 61.7);
-  float t = clamp(thr + (cover - 0.5) * 0.42, -0.15, 0.85);
-  vec2 w = vec2(cf_fbm3(uv * 0.62 + 11.5), cf_fbm3(uv * 0.62 + 27.1));
-  vec2 uw = uv + (w - 0.5) * 2.9;
-  float base = mix(cf_fbm3(uw), cf_billow(uw * 1.35), 0.45);
-  return smoothstep(t - 0.11, t + 0.27, base);
+  vec2 f = cf_field(uv);
+  float t = clamp(thr + (f.g - 0.5) * 0.42, -0.15, 0.85);
+  return smoothstep(t - 0.11, t + 0.27, f.r);
 }
 
 float cf_shape(vec2 uv, float thr) {
-  float cover = cf_fbm3(uv * 0.13 + 61.7);
-  float t = clamp(thr + (cover - 0.5) * 0.42, -0.15, 0.85);
-  vec2 w = vec2(cf_fbm3(uv * 0.62 + 11.5), cf_fbm3(uv * 0.62 + 27.1));
-  vec2 uw = uv + (w - 0.5) * 2.9;
-  float d = mix(cf_fbm3(uw), cf_billow(uw * 1.35), 0.45);
-  return clamp((d - t) / (1.0 - t), 0.0, 1.0);
+  vec2 f = cf_field(uv);
+  float t = clamp(thr + (f.g - 0.5) * 0.42, -0.15, 0.85);
+  return clamp((f.r - t) / (1.0 - t), 0.0, 1.0);
 }
 
 /**

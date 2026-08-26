@@ -120,7 +120,16 @@ void main() {
   // each step is a shape evaluation plus a three-tap sun march; the step count
   // is the single biggest lever on its cost, and with the distance-adaptive LOD
   // below doing the antialiasing, twelve buys very little over eight.
-  const int STEPS = 8;
+  // Sixteen steps.
+  //
+  // The step count was cut to eight when each sample cost twenty-four noise
+  // lookups. It now costs one texture fetch, so the march can afford to be
+  // properly sampled again — and it HAS to be. An under-sampled march hides its
+  // banding behind a per-pixel offset, and a per-pixel offset in a signal this
+  // coarse does not read as smooth cloud; it reads as a stipple of hard dots,
+  // which is precisely the "ordered-dither halftone" an art review found across
+  // every frame in the game. The cure for that is samples, not more dithering.
+  const int STEPS = 16;
 
   vec3 rd = -viewDir;                       // from the camera outward
   if (abs(rd.y) < 1e-4) discard;
@@ -141,14 +150,44 @@ void main() {
   float span = t1 - t0;
   float horiz = length(rd.xz);
 
-  // Sub-step offset, varying with TIME so it never settles into a screen
-  // pattern. Interleaved-gradient noise, which is well distributed spatially.
+  // Sub-step offset — deliberately SMALL.
+  //
+  // A full one-step random offset per pixel is the usual way to trade banding
+  // for noise, and it is the wrong trade without a temporal filter to average
+  // the noise back out: neighbouring rays land in different parts of the cloud
+  // and the deck turns into a dot screen. A quarter-step is enough to break the
+  // step boundaries into a gradient while keeping adjacent pixels correlated,
+  // and with sixteen quadratically-spaced samples there is little banding left
+  // to hide in the first place.
   float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-  float jitter = fract(ign + uTime * 0.61803399);
+  float jitter = fract(ign + uTime * 0.61803399) * 0.25;
+
+  // How many steps this pixel actually needs.
+  //
+  // A march step only buys something if it can resolve a cloud feature. Once one
+  // step spans more than a cloud is wide — which is every pixel near the horizon,
+  // and every pixel at all once the camera climbs above the deck and the disc
+  // fills the frame — extra steps are integrating the same low-frequency average
+  // over and over. This is what made the fleet-level view fifteen times more
+  // expensive than the close one: the deck covered the whole screen and every
+  // pixel paid the full eight-step march.
+  float stepSpan = span / float(STEPS);
+  float feature = 3800.0;                   // metres, coarse cloud cell
+  // Never below ten: fewer than that and the per-pixel variance between
+  // neighbouring rays becomes visible as speckle no matter how cheap the field.
+  int NS = int(clamp(16.0 * clamp(feature / max(stepSpan * horiz, 1.0), 0.62, 1.0), 10.0, 16.0));
+  float fNS = float(NS);
+
+  // Mip level for the whole ray, computed HERE — before the loop, while control
+  // flow is still uniform and a footprint can be reasoned about at all.
+  float footprint = max(fpx, (span / fNS) * horiz);
+  float fieldLod = log2(max(1.0, footprint / CLOUD_TEXEL_M));
+  float detailFade = smoothstep(7000.0, 150.0, footprint);
 
   float trans = 1.0;                        // transmittance along the ray
   vec3 scatter = vec3(0.0);                 // accumulated in-scattered light
   float squallHit = 0.0;
+  float sunOcc = -1.0;                      // lazily computed at the first hit
   float firstHitH = -1.0;
   vec2 uvMid = uv0;
 
@@ -169,8 +208,9 @@ void main() {
   // cannot resolve. Undersampled detail becomes smooth average density, which is
   // exactly what a distant cloud bank looks like anyway.
   for (int i = 0; i < STEPS; i++) {
-    float u0 = (float(i) + jitter) / float(STEPS);
-    float u1 = (float(i) + 1.0 + jitter) / float(STEPS);
+    if (i >= NS) break;
+    float u0 = (float(i) + jitter) / fNS;
+    float u1 = (float(i) + 1.0 + jitter) / fNS;
     float a0 = u0 * u0 * 0.72 + u0 * 0.28;
     float a1 = u1 * u1 * 0.72 + u1 * 0.28;
     float t = t0 + span * a0;
@@ -199,7 +239,6 @@ void main() {
     // above the sea horizon in every wide shot. fpx is the pixel's own world
     // footprint, and the field steps down through three octave levels as either
     // measure outruns it.
-    float scale = max(ds * horiz, fpx);
     // PICK an octave level; do not evaluate all three and blend.
     //
     // The blend was costing four full shape evaluations per march step — each of
@@ -208,13 +247,24 @@ void main() {
     // faded out, so choosing between them is visually the same thing and costs a
     // quarter as much. The branch is spatially coherent (it depends on distance
     // along the ray), so the whole warp takes the same side of it.
-    float d;
-    if (scale < 850.0) {
-      d = mix(cf_softShape(uvi, uCloudCoverage), cf_shape(uvi, uCloudCoverage), 0.55);
-    } else if (scale < 9000.0) {
-      d = cf_softShape(uvi * 0.34, uCloudCoverage);
-    } else {
-      d = cf_softShape(uvi * 0.075, uCloudCoverage);
+    // No manual octave chain. The mip chain IS the octave chain.
+    //
+    // This used to pick between the field at three different scales — 1.0, 0.34
+    // and 0.075 — depending on how much world a pixel covered. Those are not
+    // filtered versions of one another; they are three unrelated patterns. The
+    // original code cross-faded them, which merely smeared the seam; switching
+    // between them hard, as an earlier optimisation here did, drew the boundary
+    // as a patchwork of screen-aligned blocks over the whole deck.
+    //
+    // Now that the field is a mipmapped texture, the correctly filtered version
+    // at any footprint already exists, and the hardware picks it per pixel from
+    // the UV derivatives — continuously, and for free. One lookup, no seams.
+    float d = cf_shapeLod(uvi, uCloudCoverage, fieldLod);
+    // Close in the texture is magnified, so put the fine structure back with two
+    // live octaves — a fiftieth of the cost of evaluating the whole field.
+    if (detailFade > 0.01) {
+      float fine = cf_noise(uvi * 7.3) * 0.66 + cf_noise(uvi * 15.1 + 4.1) * 0.34;
+      d = clamp(d + (fine - 0.5) * 0.42 * detailFade * d, 0.0, 1.0);
     }
     d *= prof;
 
@@ -231,18 +281,20 @@ void main() {
     if (d <= 0.002) continue;
     if (firstHitH < 0.0) { firstHitH = f; uvMid = uvi; }
 
-    // Light march toward the sun: how much cloud is between this sample and the
-    // sun. This is what gives the deck a lit side and a shadowed side. Three
-    // taps on a dense sample, one on a thin one — a wisp's shading is not worth
-    // three shape evaluations, and thin samples are most of them.
-    float occ = cf_shape(uvi + sunUV * 1.0, uCloudCoverage);
-    if (d > 0.16) {
-      occ += cf_shape(uvi + sunUV * 2.4, uCloudCoverage)
-           + cf_shape(uvi + sunUV * 4.6, uCloudCoverage);
-    } else {
-      occ *= 3.0;
+    // Light march toward the sun, evaluated ONCE for the ray and reused.
+    //
+    // It used to run inside the step loop — up to three more field lookups on
+    // every one of eight steps, which was the majority of the entire shader's
+    // cost. The sun direction is fixed and the slab is under two kilometres
+    // thick, so the amount of cloud between a sample and the sun barely changes
+    // between the base of the ray and its top; computing it at the first hit and
+    // carrying it down the ray is visually the same lit-side/shadow-side result
+    // for a fraction of the work.
+    if (sunOcc < 0.0) {
+      sunOcc = cf_shape(uvi + sunUV * 1.2, uCloudCoverage) * 1.6
+             + cf_shape(uvi + sunUV * 3.4, uCloudCoverage) * 1.4;
     }
-    float sunT = exp(-occ * 1.6);
+    float sunT = exp(-sunOcc * 1.6);
     // Powder / dark-edge: thin cloud scatters more light back than thick cloud.
     float powder = 1.0 - exp(-d * 4.0);
     // Height within the slab: tops are bright, bases are slate.
@@ -310,6 +362,8 @@ void main() {
 export class CloudLayer {
   constructor(sharedUniforms) {
     this.material = new THREE.ShaderMaterial({
+      // texture2DLodEXT: explicit mip selection inside the march (see cf_fieldLod).
+      extensions: { shaderTextureLOD: true },
       vertexShader: VERT,
       fragmentShader: FRAG,
       uniforms: {
@@ -318,6 +372,7 @@ export class CloudLayer {
         uSunDirection: sharedUniforms.uSunDirection,
         uSunColor: sharedUniforms.uSunColor,
         uCloudCoverage: sharedUniforms.uCloudCoverage,
+        uCloudField: sharedUniforms.uCloudField,
         uCloudiness: sharedUniforms.uCloudiness,
         uHorizonColor: sharedUniforms.uHorizonColor,
         uVisibility: sharedUniforms.uVisibility,

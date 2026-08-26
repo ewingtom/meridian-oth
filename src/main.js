@@ -69,8 +69,10 @@ class Game {
     this._wireScreens();
     this._clock = new THREE.Clock();
     this._perf = [];
-    // On by default while performance is being worked on; Shift+F toggles it.
-    this._perfOn = true;
+    // Off by default — it is a diagnostic, and an art review quite rightly
+    // called it out for printing over the middle of every frame in the shipped
+    // build. Shift+F brings it back when a frame rate needs explaining.
+    this._perfOn = false;
   }
 
   // ── world event → presentation ────────────────────────────────────────────
