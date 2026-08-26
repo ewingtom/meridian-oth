@@ -1068,22 +1068,20 @@ varying float vDist;
 
 ${CLOUD_FIELD_GLSL}
 
+uniform sampler2D uSeaField;
+#define SEA_TILE 8.0
+
+// Same substitution as the main ocean shader — see the note there. The far sea
+// covers the whole screen from any altitude, so it benefits at least as much.
+// (Its fbm ran four octaves rather than three; the baked field is three, which
+// at far-sea distances is well past the point where the fourth is resolvable.)
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
   p += dot(p, p + 45.32);
   return fract(p.x * p.y);
 }
-float noise(vec2 p) {
-  vec2 i = floor(p); vec2 f = fract(p);
-  float a = hash(i), b = hash(i + vec2(1.0, 0.0)), c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-}
-float fbm(vec2 p) {
-  float v = 0.0, amp = 0.5;
-  for (int i = 0; i < 4; i++) { v += amp * noise(p); p = p * 2.06 + vec2(3.1, 7.7); amp *= 0.5; }
-  return v;
-}
+float noise(vec2 p) { return texture2D(uSeaField, p / SEA_TILE).g; }
+float fbm(vec2 p) { return texture2D(uSeaField, p / SEA_TILE).r; }
 
 /*
  * Aerial perspective, integrated through a two-component atmosphere.
@@ -1276,6 +1274,7 @@ export class OceanField {
       uFieldR: { value: WAVE_FIELD_R },
       uCloudCoverage: { value: 0.40 },
       uCloudField: { value: null },
+      uSeaField: { value: null },
       uCloudiness: { value: 0.95 },
       uWakePos: { value: Array.from({ length: NUM_WAKES }, () => new THREE.Vector4()) },
       uWakeCol: { value: Array.from({ length: NUM_WAKES }, () => new THREE.Vector4(0.42, 0.45, 0.48, 0)) },
@@ -1340,6 +1339,7 @@ export class OceanField {
         uWaveFieldR: { value: WAVE_FIELD_R * 0.985 },
         uCloudCoverage: this.uniforms.uCloudCoverage,
         uCloudField: this.uniforms.uCloudField,
+        uSeaField: this.uniforms.uSeaField,
         uCloudiness: this.uniforms.uCloudiness,
         uVisibility: this.uniforms.uVisibility,
       },

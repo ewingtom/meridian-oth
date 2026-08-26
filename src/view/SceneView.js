@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SkySystem } from '../core/sky.js';
 import { OceanField, WIND_DIR } from '../core/ocean.js';
 import { CloudLayer } from '../core/CloudLayer.js';
-import { bakeCloudField } from '../core/CloudField.js';
+import { bakeCloudField, bakeSeaField } from '../core/CloudField.js';
 import { RainField } from '../core/Rain.js';
 
 const _rainVp = new THREE.Vector2();
@@ -143,6 +143,9 @@ export class SceneView {
     this.cloudField = bakeCloudField(this.renderer, 2048);
     this.ocean.uniforms.uCloudField.value = this.cloudField;
     this.sky.sky.material.uniforms.uCloudField.value = this.cloudField;
+    // Same treatment for the sea's own noise; see bakeSeaField.
+    this.seaField = bakeSeaField(this.renderer, 1024);
+    this.ocean.uniforms.uSeaField.value = this.seaField;
 
     this.clouds = new CloudLayer(this.ocean.uniforms);
     this.rain = new RainField(this.ocean.uniforms);

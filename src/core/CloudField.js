@@ -153,3 +153,120 @@ export function bakeCloudField(renderer, size = 1024) {
   }
   return rt.texture;
 }
+
+
+/*
+ * The SEA's noise field, baked the same way and for the same reason.
+ *
+ * The ocean shader calls fbm() fourteen times and noise() three times per water
+ * pixel, and the ocean is most of the screen. Measured with GPU timer queries it
+ * was 27.7 ms of a 50 ms frame — the most expensive thing left in the game once
+ * the clouds became a texture lookup.
+ *
+ * Every one of those calls has the form fbm(worldXZ * scale + time * drift).
+ * Adding a time term is a TRANSLATION of the sample domain, and a translation of
+ * the domain is exactly what scrolling a texture lookup does — so the animation
+ * survives the bake untouched. Only the field itself is precomputed.
+ *
+ * R holds the three-octave fbm the shader's fbm() produced; G holds the single
+ * octave its noise() produced. Both wrap, so the sampler can repeat forever.
+ */
+export const SEA_TILE = 8.0;
+
+const SEA_BAKE_FRAG = /* glsl */`
+precision highp float;
+varying vec2 vUv;
+uniform float uTile;
+
+/* The ocean's own hash, with the lattice wrapped so the bake tiles. */
+float sHash(vec2 p, float period) {
+  p = mod(p, vec2(period));
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+float sNoise(vec2 p, float period) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  float a = sHash(i, period);
+  float b = sHash(i + vec2(1.0, 0.0), period);
+  float c = sHash(i + vec2(0.0, 1.0), period);
+  float d = sHash(i + vec2(1.0, 1.0), period);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+/*
+ * Three octaves, matching the shader's fbm(). The octave ratio was 2.02 there —
+ * irrational on purpose, to stop octaves reinforcing into axis-aligned
+ * structure. A tiling bake cannot have that: every octave has to close on the
+ * tile boundary, so the ratio must be exactly 2. The visible cost is a slight
+ * tendency for features to line up, which is far less objectionable in water —
+ * where the Gerstner displacement is already breaking the surface up — than the
+ * frame time was.
+ */
+float sFbm(vec2 p, float period) {
+  float v = 0.0, amp = 0.5, per = period;
+  for (int i = 0; i < 3; i++) {
+    v += amp * sNoise(p, per);
+    p *= 2.0; per *= 2.0; amp *= 0.5;
+  }
+  return v;
+}
+
+void main() {
+  vec2 uv = vUv * uTile;
+  // R: fbm as the shader produced it (peaks at 0.875, so it fits in [0,1]).
+  // G: one octave, for the plain noise() calls.
+  gl_FragColor = vec4(sFbm(uv, uTile), sNoise(uv, uTile), 0.0, 1.0);
+}
+`;
+
+/** Bake the sea's noise field. One 1024-square draw at startup. */
+export function bakeSeaField(renderer, size = 1024) {
+  const rt = new THREE.WebGLRenderTarget(size, size, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    minFilter: THREE.LinearMipmapLinearFilter,
+    magFilter: THREE.LinearFilter,
+    wrapS: THREE.RepeatWrapping,
+    wrapT: THREE.RepeatWrapping,
+    generateMipmaps: true,
+    depthBuffer: false,
+    stencilBuffer: false,
+  });
+
+  const scene = new THREE.Scene();
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const mat = new THREE.RawShaderMaterial({
+    vertexShader: `precision highp float;
+      attribute vec3 position; attribute vec2 uv; varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: SEA_BAKE_FRAG,
+    uniforms: { uTile: { value: SEA_TILE } },
+    depthTest: false,
+    depthWrite: false,
+  });
+  const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  scene.add(quad);
+
+  const prevTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(rt);
+  renderer.render(scene, cam);
+  renderer.setRenderTarget(prevTarget);
+
+  quad.geometry.dispose();
+  mat.dispose();
+
+  rt.texture.wrapS = THREE.RepeatWrapping;
+  rt.texture.wrapT = THREE.RepeatWrapping;
+
+  const gl = renderer.getContext();
+  const glTex = renderer.properties.get(rt.texture).__webglTexture;
+  if (glTex) {
+    const prevBinding = gl.getParameter(gl.TEXTURE_BINDING_2D);
+    gl.bindTexture(gl.TEXTURE_2D, glTex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, prevBinding);
+  }
+  return rt.texture;
+}
