@@ -598,8 +598,20 @@ void main() {
       hullShade = min(hullShade, 1.0 - occ * 0.86);
     }
 
-    float besideHull = smoothstep(halfLen * 0.72, halfLen * 0.28, abs(along))
-      * smoothstep(beam * 2.6, beam * 0.5, side);
+    // Contact occlusion, and NOTHING WIDER.
+    //
+    // This used to reach 2.6 beams out from the hull and darken that whole
+    // region by nearly half. A soft-edged rounded rectangle of dark water,
+    // aligned to the hull and completely indifferent to where the sun is, is not
+    // a shadow — it is a decal, and an art review saw it for exactly that: "a
+    // hard-edged grey shadow polygon floats beside every ship."
+    //
+    // The real hull shadow is hullShade above, which walks the air column toward
+    // the sun and falls where a shadow actually falls. This term's only job is
+    // the darkening in the few metres right against the plating where the sky is
+    // genuinely occluded, so it is now tight enough to read as contact.
+    float besideHull = smoothstep(halfLen * 1.02, halfLen * 0.80, abs(along))
+      * smoothstep(beam * 1.05, beam * 0.46, side);
     float waterlineRing = smoothstep(beam * 1.85, beam * 0.22, side)
       * smoothstep(halfLen + 18.0, halfLen * 0.92, abs(along));
     besideHullMax = max(besideHullMax, besideHull);
@@ -824,8 +836,8 @@ void main() {
   sunSpec += uSunColor * broadSpec * (0.25 + 0.5 * nearDetail);
 
   float horizonBoost = pow(1.0 - clamp(N.y, 0.0, 1.0), 2.2);
-  float contactDim = mix(0.30, 1.0, contactKill);
-  contactDim *= mix(0.55, 1.0, 1.0 - besideHullMax * 0.92);
+  float contactDim = mix(0.62, 1.0, contactKill);
+  contactDim *= mix(0.84, 1.0, 1.0 - besideHullMax * 0.92);
   contactDim *= mix(0.45, 1.0, 1.0 - waterlineMax);
   contactDim *= mix(0.75, 1.0, 1.0 - nearShipMax * 0.85);
   float fresnelUse = fresnel * mix(0.55, 0.96, contactKill) * (1.0 - nearShipMax * 0.25);
