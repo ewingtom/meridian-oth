@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+
+# Art-review captures and Blender working renders. These are large (100MB+),
+# regenerated on demand, and of no use to anyone cloning the repo.
+.review/

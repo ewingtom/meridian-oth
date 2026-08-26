@@ -1,0 +1,347 @@
+import * as THREE from 'three';
+import { CLOUD_FIELD_GLSL } from './skyShader.js';
+
+/**
+ * The cumulus deck, as real geometry.
+ *
+ * A sky box can only ever draw clouds BEHIND everything, which is fine while the
+ * camera is under the deck and wrong the moment it is not. This game's camera
+ * climbs to 250 km and its aircraft cruise at 8,000 m, so the deck has to be a
+ * surface in the world: something the sea can be seen through gaps in, something
+ * a Poseidon flies above and a sea-skimming missile flies under.
+ *
+ * It is a single horizontal disc at cloud-base height, centred on the camera,
+ * with the cloud field evaluated per fragment. Thickness is faked by the standard
+ * trick of dividing optical depth by the cosine of the view angle: look at the
+ * deck edge-on and you are looking through kilometres of cloud, so it goes solid;
+ * look straight up through a gap and it is clear. Combined with the light march
+ * toward the sun (bright tops, grey bases, burning rims where the sun comes
+ * through thin edges) that reads as volume from every angle the game can take.
+ */
+
+const BASE_H = 2100;
+const OUTER_R = 260000;
+const INNER_R = 300;
+
+function buildDisc(rings = 52, segs = 160) {
+  const pos = new Float32Array((rings + 1) * (segs + 1) * 3);
+  const idx = [];
+  let p = 0;
+  for (let r = 0; r <= rings; r++) {
+    const t = r / rings;
+    const rad = INNER_R * Math.pow(OUTER_R / INNER_R, t);
+    for (let s = 0; s <= segs; s++) {
+      const a = (s === segs ? 0 : s / segs) * Math.PI * 2;   // exact wrap, no crack
+      pos[p++] = Math.cos(a) * rad;
+      pos[p++] = 0;
+      pos[p++] = Math.sin(a) * rad;
+    }
+  }
+  for (let r = 0; r < rings; r++) {
+    for (let s = 0; s < segs; s++) {
+      const a = r * (segs + 1) + s;
+      idx.push(a, a + (segs + 1), a + 1, a + 1, a + (segs + 1), a + segs + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeBoundingSphere();
+  geo.boundingSphere.radius = OUTER_R * 1.5;
+  return geo;
+}
+
+const VERT = /* glsl */`
+uniform float uEarthR;
+varying vec3 vWorldPos;
+varying float vRad;
+void main() {
+  vec3 p = position + vec3(modelMatrix[3].x, modelMatrix[3].y, modelMatrix[3].z);
+  float d = length(position.xz);
+  vRad = d;
+  // The deck follows the curve of the earth like everything else, which is what
+  // lets it meet the sea horizon instead of hanging above it like a ceiling.
+  p.y -= (d * d) / (2.0 * uEarthR);
+  vWorldPos = p;
+  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+}
+`;
+
+const FRAG = /* glsl */`
+uniform float uTime;
+uniform vec3 uCamPos;
+uniform vec3 uSunDirection;
+uniform vec3 uSunColor;
+uniform vec3 uLitColor;
+uniform vec3 uShadowColor;
+uniform vec3 uHorizonColor;
+uniform float uVisibility;
+uniform float uOuter;
+uniform vec4 uSquall[4];   // xz centre, z radius, w strength
+varying vec3 vWorldPos;
+varying float vRad;
+
+${CLOUD_FIELD_GLSL}
+
+float layerDepth(float dist, float lo, float hi, float H) {
+  float dh = hi - lo;
+  if (dh < 1.0) return dist * exp(-lo / H);
+  return dist * (H / dh) * (exp(-lo / H) - exp(-hi / H));
+}
+
+void main() {
+  vec3 toCam = uCamPos - vWorldPos;
+  float dist = length(toCam);
+  vec3 viewDir = toCam / max(dist, 1e-4);
+  vec2 uv0 = (vWorldPos.xz - uCamPos.xz) * 0.00026;
+
+  vec2 wind = vec2(uTime * 4.2, uTime * 1.3);
+
+  // ── raymarch ──────────────────────────────────────────────────────────────
+  //
+  // A real march with transmittance, not an average of samples.
+  //
+  // The previous implementation averaged N density samples taken at fixed
+  // heights and then pushed the mean through one Beer-Lambert term. Two things
+  // came out of that, and an art review measured both: horizontal density
+  // banding at the sample spacing (an FFT of the sky put its peaks at exactly
+  // dy = +/-5, +/-7, +/-11, dx = 0), and — from the per-pixel offset added to
+  // hide it — a screen-locked 8x8 ordered lattice over every cloud pixel in the
+  // game, which reads as a dithered GIF.
+  //
+  // Marching properly fixes both at the root. Each step contributes
+  // exp(-sigma*ds) to the transmittance, so the result is a smooth integral
+  // rather than a quantised mean, and no dither is needed to hide anything. The
+  // offset that remains is a temporally-varying hash at a fraction of a step,
+  // which averages out over frames instead of standing still on the screen.
+  const float SLAB_LO = 1450.0;
+  const float SLAB_HI = 3350.0;
+  // Eight steps, not twelve. The march runs on every sky pixel in the frame and
+  // each step is a shape evaluation plus a three-tap sun march; the step count
+  // is the single biggest lever on its cost, and with the distance-adaptive LOD
+  // below doing the antialiasing, twelve buys very little over eight.
+  const int STEPS = 8;
+
+  vec3 rd = -viewDir;                       // from the camera outward
+  if (abs(rd.y) < 1e-4) discard;
+
+  // World-space size of this pixel on the deck.
+  float fpx = max(fwidth(vWorldPos.x), fwidth(vWorldPos.z));
+
+  // Slab entry and exit along the ray.
+  float t0 = (SLAB_LO - uCamPos.y) / rd.y;
+  float t1 = (SLAB_HI - uCamPos.y) / rd.y;
+  if (t0 > t1) { float tmp = t0; t0 = t1; t1 = tmp; }
+  t0 = max(t0, 0.0);
+  if (t1 <= t0) discard;
+  // Bound the march. At grazing incidence the true slab crossing is hundreds of
+  // kilometres, which both costs everything and aliases; forty kilometres of
+  // cloud is already opaque.
+  t1 = min(t1, t0 + 34000.0);
+  float span = t1 - t0;
+  float horiz = length(rd.xz);
+
+  // Sub-step offset, varying with TIME so it never settles into a screen
+  // pattern. Interleaved-gradient noise, which is well distributed spatially.
+  float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  float jitter = fract(ign + uTime * 0.61803399);
+
+  float trans = 1.0;                        // transmittance along the ray
+  vec3 scatter = vec3(0.0);                 // accumulated in-scattered light
+  float squallHit = 0.0;
+  float firstHitH = -1.0;
+  vec2 uvMid = uv0;
+
+  vec2 sunUV = normalize(uSunDirection.xz + vec2(1e-4, 0.0)) * 0.10;
+
+  // Steps grow with distance, and the field is BLURRED to match the step.
+  //
+  // Uniform steps are what produced the soft rectangular blotches across the sky
+  // in a low camera. Near the horizon the slab crossing is tens of kilometres,
+  // so twelve even steps land three kilometres apart — more than two full
+  // periods of the cloud noise — and each sample falls in an uncorrelated cell.
+  // The march then reconstructs garbage: big square patches at the step spacing.
+  //
+  // The fix is the one cone tracing uses. Steps are distributed quadratically so
+  // the near field, where detail is actually visible, gets the resolution; and
+  // whenever a step is longer than a cloud feature, that sample reads a
+  // low-frequency version of the field instead of point-sampling a detail it
+  // cannot resolve. Undersampled detail becomes smooth average density, which is
+  // exactly what a distant cloud bank looks like anyway.
+  for (int i = 0; i < STEPS; i++) {
+    float u0 = (float(i) + jitter) / float(STEPS);
+    float u1 = (float(i) + 1.0 + jitter) / float(STEPS);
+    float a0 = u0 * u0 * 0.72 + u0 * 0.28;
+    float a1 = u1 * u1 * 0.72 + u1 * 0.28;
+    float t = t0 + span * a0;
+    float ds = max(1.0, span * (a1 - a0));
+    vec3 p = uCamPos + rd * t;
+    float f = clamp((p.y - SLAB_LO) / (SLAB_HI - SLAB_LO), 0.0, 1.0);
+    // Vertical density profile — a cumulus has a base, a body and a broken top.
+    float prof = sin(f * 3.14159);
+    prof *= prof;
+    // Shear the field with height.
+    //
+    // The cloud shape is a 2-D field extruded up the slab, so every sample along
+    // one view ray reads the SAME horizontal position — a dense cell therefore
+    // smears along the ray and projects to a hard vertical streak on screen,
+    // which is exactly what the sky showed in any low camera. Offsetting the
+    // lookup with altitude breaks that: each level of the cloud is displaced
+    // from the one below it, so a ray crosses different cloud at different
+    // heights, which is also what a real cumulus does under wind shear.
+    vec2 shear = vec2(f * 1150.0, f * -680.0);
+    vec2 uvi = ((p.xz - uCamPos.xz) + wind + shear) * 0.00026;
+    // Two things can undersample the field, and both have to be accounted for:
+    // the march step (handled by ds * horiz) and the SCREEN PIXEL itself. Near
+    // the horizon one pixel of the deck covers tens of kilometres of cloud, so
+    // even a perfectly fine march reads a different cloud in each neighbouring
+    // pixel — which drew a fifteen-pixel band of crawling speckle immediately
+    // above the sea horizon in every wide shot. fpx is the pixel's own world
+    // footprint, and the field steps down through three octave levels as either
+    // measure outruns it.
+    float scale = max(ds * horiz, fpx);
+    // PICK an octave level; do not evaluate all three and blend.
+    //
+    // The blend was costing four full shape evaluations per march step — each of
+    // them four five-octave fbm stacks — on every sky pixel, eight steps deep.
+    // The three levels only ever differ where one of them is already being
+    // faded out, so choosing between them is visually the same thing and costs a
+    // quarter as much. The branch is spatially coherent (it depends on distance
+    // along the ray), so the whole warp takes the same side of it.
+    float d;
+    if (scale < 850.0) {
+      d = mix(cf_softShape(uvi, uCloudCoverage), cf_shape(uvi, uCloudCoverage), 0.55);
+    } else if (scale < 9000.0) {
+      d = cf_softShape(uvi * 0.34, uCloudCoverage);
+    } else {
+      d = cf_softShape(uvi * 0.075, uCloudCoverage);
+    }
+    d *= prof;
+
+    // Squall cells: a real, positioned body of rain thickens and blackens the
+    // deck over itself. The plot knows where these are and so does the sensor
+    // model, so a dark shaft on the horizon is somewhere you can actually hide.
+    for (int q = 0; q < 4; q++) {
+      if (uSquall[q].z < 1.0) continue;
+      float sd = length(p.xz - uSquall[q].xy) / uSquall[q].z;
+      float inCell = 1.0 - smoothstep(0.45, 1.0, sd);
+      d = mix(d, min(1.0, d + 0.6), inCell * uSquall[q].w);
+      squallHit = max(squallHit, inCell * uSquall[q].w);
+    }
+    if (d <= 0.002) continue;
+    if (firstHitH < 0.0) { firstHitH = f; uvMid = uvi; }
+
+    // Light march toward the sun: how much cloud is between this sample and the
+    // sun. This is what gives the deck a lit side and a shadowed side. Three
+    // taps on a dense sample, one on a thin one — a wisp's shading is not worth
+    // three shape evaluations, and thin samples are most of them.
+    float occ = cf_shape(uvi + sunUV * 1.0, uCloudCoverage);
+    if (d > 0.16) {
+      occ += cf_shape(uvi + sunUV * 2.4, uCloudCoverage)
+           + cf_shape(uvi + sunUV * 4.6, uCloudCoverage);
+    } else {
+      occ *= 3.0;
+    }
+    float sunT = exp(-occ * 1.6);
+    // Powder / dark-edge: thin cloud scatters more light back than thick cloud.
+    float powder = 1.0 - exp(-d * 4.0);
+    // Height within the slab: tops are bright, bases are slate.
+    vec3 lit = mix(uShadowColor, uLitColor, sunT * (0.28 + 0.72 * powder));
+    lit = mix(lit * 0.72, lit, mix(0.30, 1.0, f));
+
+    float sigma = d * 0.00085;              // extinction per metre
+    float aStep = 1.0 - exp(-sigma * ds);
+    scatter += trans * aStep * lit;
+    trans *= 1.0 - aStep;
+    if (trans < 0.012) break;
+  }
+
+  float alpha = (1.0 - trans) * uCloudiness;
+  if (alpha < 0.004) discard;
+  vec2 uv = uvMid;
+  float dens = 1.0 - trans;
+  vec3 col = scatter / max(0.02, 1.0 - trans);
+
+  float sunDot = clamp(dot(-viewDir, uSunDirection), 0.0, 1.0);
+  // Silver lining: thin cloud in front of the sun glows, thick cloud does not.
+  // Under a storm the sun is behind kilometres of water and the lining is a
+  // pale grey, not gold — a warm sun colour smeared over a sixty-degree lobe is
+  // what turned an overcast gale sky khaki brown.
+  float wxGrey = 1.0 - clamp((uHorizonColor.b - uHorizonColor.r) * 6.0, 0.0, 1.0);
+  vec3 lining = mix(uSunColor, vec3(dot(uSunColor, vec3(0.33))), wxGrey * 0.85);
+  col += lining * pow(sunDot, 6.0) * (1.0 - dens) * mix(1.9, 0.55, wxGrey);
+  col += lining * pow(sunDot, 22.0) * (1.0 - alpha) * mix(0.7, 0.25, wxGrey);
+  // Under a squall the base goes slate and the whole cell darkens.
+  col = mix(col, col * vec3(0.34, 0.38, 0.44), squallHit);
+  alpha = min(1.0, alpha + squallHit * 0.30);
+
+  // Flying through the deck: fade out as the camera crosses cloud base, so an
+  // aircraft does not punch through an infinitely thin sheet.
+  float thru = smoothstep(0.0, 520.0, abs(uCamPos.y - vWorldPos.y));
+  alpha *= thru;
+  alpha *= 1.0 - smoothstep(11000.0, 19000.0, uCamPos.y);
+
+  // Aerial perspective, so the far edge of the deck dissolves into the horizon
+  // rather than terminating at a visible rim.
+  float k = 3.912 / uVisibility;
+  float lo = min(uCamPos.y, vWorldPos.y);
+  float hi = max(uCamPos.y, vWorldPos.y);
+  float air = 1.0 - exp(-(k * layerDepth(dist, max(lo,0.0), max(hi,0.0), 1250.0)
+                        + 1.15e-5 * layerDepth(dist, max(lo,0.0), max(hi,0.0), 8400.0)));
+  col = mix(col, uHorizonColor * 0.97, air * 0.92);
+  alpha *= 1.0 - smoothstep(uOuter * 0.55, uOuter * 0.98, vRad);
+  // One LSB of dither on the alpha, from a hash that MOVES with time. A static
+  // hash is a fixed screen pattern, and a fixed screen pattern over every cloud
+  // pixel is exactly the artefact this was meant to prevent.
+  // Interleaved-gradient noise, not a sine hash: a sine hash on the pixel
+  // lattice IS a fixed pattern, which is the whole artefact this line exists to
+  // avoid.
+  {
+    vec3 m = vec3(0.06711056, 0.00583715, 52.9829189);
+    float ignA = fract(m.z * fract(dot(gl_FragCoord.xy + vec2(uTime * 5.588238, uTime * 3.301), m.xy)));
+    alpha += (ignA - 0.5) * (1.2 / 255.0);
+  }
+  alpha = clamp(alpha, 0.0, 1.0);
+  if (alpha < 0.004) discard;
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
+export class CloudLayer {
+  constructor(sharedUniforms) {
+    this.material = new THREE.ShaderMaterial({
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+      uniforms: {
+        uTime: sharedUniforms.uTime,
+        uCamPos: sharedUniforms.uCamPos,
+        uSunDirection: sharedUniforms.uSunDirection,
+        uSunColor: sharedUniforms.uSunColor,
+        uCloudCoverage: sharedUniforms.uCloudCoverage,
+        uCloudiness: sharedUniforms.uCloudiness,
+        uHorizonColor: sharedUniforms.uHorizonColor,
+        uVisibility: sharedUniforms.uVisibility,
+        uEarthR: sharedUniforms.uEarthR,
+        uLitColor: { value: new THREE.Color(0xf6f9fc) },
+        uShadowColor: { value: new THREE.Color(0x62748a) },
+        uOuter: { value: OUTER_R },
+        uSquall: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
+      },
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    this.mesh = new THREE.Mesh(buildDisc(), this.material);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 1;
+    this.mesh.position.y = BASE_H;
+  }
+
+  update(camera) {
+    this.mesh.position.set(camera.position.x, BASE_H, camera.position.z);
+  }
+}
+
+export const CLOUD_BASE_H = BASE_H;

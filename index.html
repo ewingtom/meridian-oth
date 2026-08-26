@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>MERIDIAN · Over the Horizon</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%2304080c'/><circle cx='16' cy='16' r='9' fill='none' stroke='%235ec8ff' stroke-width='2'/><path d='M16 3v26M3 16h26' stroke='%235ec8ff' stroke-width='1' opacity='.5'/></svg>" />
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+  <canvas id="overlay"></canvas>
+
+  <div id="hud" style="display:none">
+    <!-- ── top bar ─────────────────────────────────────────────────────── -->
+    <div id="topbar">
+      <div class="seg"><div class="brand"><svg class="brandmark" viewBox="0 0 120 120" width="17" height="17" aria-hidden="true"><circle cx="60" cy="60" r="52" fill="none" stroke="currentColor" stroke-opacity="0.5" stroke-width="4"/><ellipse cx="60" cy="60" rx="17" ry="52" fill="none" stroke="currentColor" stroke-opacity="0.85" stroke-width="4"/><path d="M12 68 H108" stroke="currentColor" stroke-width="4"/></svg>MERIDIAN<span> · OTH</span></div></div>
+      <div class="seg"><span class="k">Mission</span><span class="v" id="mission-name">NORTH ANCHOR</span></div>
+      <div class="seg"><span class="k">Zulu</span><span id="clock">04:10:00</span></div>
+      <div class="seg">
+        <span class="k">Time</span>
+        <div class="tc-btns" id="tc"></div>
+      </div>
+      <div class="seg"><span class="k">Phase</span><span id="phase-pill">SEARCH</span></div>
+      <div class="seg hide-sm"><span class="k">Sea</span><span class="v" id="env-readout">SS3 · VIS 12 nm</span></div>
+      <div class="seg"><span class="k">Graphics</span><div class="tc-btns" id="gfx"></div></div>
+      <div class="seg grow" style="justify-content:flex-end">
+        <span class="k" id="obj-hint">Objective</span>
+        <span class="v" id="obj-text">Locate the Volsk surface action group</span>
+      </div>
+    </div>
+
+    <!-- ── left column ─────────────────────────────────────────────────── -->
+    <div id="left">
+      <div class="panel" id="force">
+        <div class="panel-h"><span>Task Force 44</span><span class="n" id="force-count">8</span></div>
+        <div class="scroll" id="force-list"></div>
+      </div>
+      <div class="panel" id="comms">
+        <div class="panel-h"><span>Fleet Net · TF-44</span><span class="n">LINK 16</span></div>
+        <div class="scroll" id="comms-list"></div>
+      </div>
+    </div>
+
+    <!-- ── centre (world) ──────────────────────────────────────────────── -->
+    <div id="center" class="passthrough">
+      <div id="cam-tag"><b>TACTICAL</b> · <span id="cam-alt">42 km</span></div>
+      <div id="perf" title="Shift+F toggles"><span id="perf-fps">--</span><span class="u">fps</span><span id="perf-ms">--</span><span class="u">ms</span><span id="perf-sim">--</span><span class="u">sim</span><span id="perf-gpu">--</span><span class="u">draw</span><span id="perf-res"></span></div>
+      <div id="alerts"></div>
+      <div id="signals"></div>
+      <div id="hint-bar"></div>
+      <div id="missile-cam">
+        <div class="frame"></div>
+        <div class="tag"><span class="rec">●</span> WEAPON CAMERA <span id="mc-id"></span></div>
+        <div class="data" id="mc-data"></div>
+        <svg class="reticle" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="34" fill="none" stroke="rgba(255,180,80,0.55)" stroke-width="1"/>
+          <circle cx="60" cy="60" r="3" fill="none" stroke="rgba(255,180,80,0.9)" stroke-width="1"/>
+          <path d="M60 12v18M60 90v18M12 60h18M90 60h18" stroke="rgba(255,180,80,0.7)" stroke-width="1"/>
+        </svg>
+      </div>
+      <div id="bridge-hud">
+        <div class="vignette"></div>
+        <div id="compass-strip"><canvas id="compass" width="1120" height="68"></canvas></div>
+        <div id="bridge-instruments">
+          <div class="telegraph" id="telegraph"></div>
+          <div class="gauge"><div class="k">Speed</div><div class="g" id="bi-speed">16<small> kt</small></div></div>
+          <div class="gauge"><div class="k">Course</div><div class="g" id="bi-course">008<small>°T</small></div></div>
+          <div class="gauge"><div class="k">Rudder</div><div class="g" id="bi-rudder">00<small>°</small></div></div>
+          <div class="gauge"><div class="k">Contacts</div><div class="g" id="bi-contacts">0</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── right column ────────────────────────────────────────────────── -->
+    <div id="right">
+      <div class="panel" id="contacts">
+        <div class="panel-h"><span>Tactical Picture</span><span class="n" id="contact-count">0</span></div>
+        <div class="scroll" id="contact-list"></div>
+      </div>
+      <div class="panel" id="detail">
+        <div class="panel-h"><span id="detail-title">No contact selected</span><span class="n" id="detail-tq"></span></div>
+        <div class="scroll" id="detail-body"></div>
+      </div>
+    </div>
+
+    <!-- ── bottom order bar ────────────────────────────────────────────── -->
+    <div id="bottom">
+      <div class="panel" id="orders">
+        <div class="panel-h"><span id="orders-title">No unit selected</span><span class="n" id="orders-sub"></span></div>
+        <div id="orders-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── engagement dialog ─────────────────────────────────────────────── -->
+  <div id="engage-modal">
+    <div id="engage-box">
+      <div class="hd"><span>WEAPON ASSIGNMENT</span><span id="eng-track"></span></div>
+      <div class="bd" id="engage-body"></div>
+      <div class="dlg-btns">
+        <button class="act" id="eng-cancel">Cancel</button>
+        <button class="act danger" id="eng-fire">Batteries Release</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── screens ───────────────────────────────────────────────────────── -->
+  <div class="screen" id="screen-menu">
+    <div class="screen-inner">
+      <div class="title-block">
+        <!-- Logomark: a meridian line crossing a compass rose over the horizon.
+             Drawn as vectors rather than set in a font so the identity is
+             identical on every platform — the body text still falls back to the
+             system stacks, but the mark that carries the brand does not. -->
+        <svg class="logomark" viewBox="0 0 120 120" width="88" height="88" aria-label="MERIDIAN">
+          <defs>
+            <linearGradient id="lgSea" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#5ec8ff" stop-opacity="0.95"/>
+              <stop offset="1" stop-color="#1d5aa0" stop-opacity="0.25"/>
+            </linearGradient>
+          </defs>
+          <circle cx="60" cy="60" r="52" fill="none" stroke="#5ec8ff" stroke-opacity="0.35" stroke-width="1"/>
+          <circle cx="60" cy="60" r="43" fill="none" stroke="#5ec8ff" stroke-opacity="0.18" stroke-width="1"/>
+          <!-- horizon -->
+          <path d="M12 68 H108" stroke="#9fd4f5" stroke-opacity="0.8" stroke-width="1.3"/>
+          <!-- meridian: the great circle, foreshortened -->
+          <ellipse cx="60" cy="60" rx="17" ry="52" fill="none" stroke="url(#lgSea)" stroke-width="1.4"/>
+          <!-- the north point -->
+          <path d="M60 10 L66 40 L60 34 L54 40 Z" fill="#5ec8ff" fill-opacity="0.9"/>
+          <!-- ticks -->
+          <g stroke="#9fd4f5" stroke-opacity="0.55" stroke-width="1">
+            <path d="M60 8 V16"/><path d="M60 104 V112"/>
+            <path d="M8 60 H16"/><path d="M104 60 H112"/>
+          </g>
+          <!-- a hull on the horizon, hull-down -->
+          <path d="M44 68 L48 63 L72 63 L76 68 Z" fill="#e8f4fb" fill-opacity="0.92"/>
+          <path d="M57 63 V54 H63 V63" fill="#e8f4fb" fill-opacity="0.75"/>
+        </svg>
+        <h1>MERIDIAN</h1>
+        <h2>OVER THE HORIZON</h2>
+        <div class="rule"></div>
+      </div>
+      <div class="brief" style="text-align:center">
+        <p style="color:var(--dim);font-size:11.5px;line-height:1.9">
+          A modern naval combat simulator about the thing that actually decides engagements at sea:
+          <b style="color:var(--accent)">not the missile, but whether anyone knows where the enemy is</b>.<br/>
+          You command Task Force 44. You will search an ocean, manage what you radiate,
+          build a kill web out of aircraft and submarines and destroyers, and shoot at a prediction.
+        </p>
+      </div>
+      <div class="menu-btns">
+        <button id="btn-start">Begin Operation</button>
+        <button class="ghost" id="btn-howto">Controls &amp; Doctrine</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen hidden gone" id="screen-brief">
+    <div class="screen-inner">
+      <div class="title-block" style="margin-bottom:20px">
+        <h1 style="font-size:34px">OPERATION NORTH ANCHOR</h1>
+        <h2 id="brief-sub">KESTREL SEA · 0410 LOCAL</h2>
+      </div>
+      <div class="brief-wrap">
+        <div class="brief" id="brief-body"></div>
+        <div class="scroll-more">▼  SCROLL FOR MORE  ▼</div>
+      </div>
+      <div class="menu-btns">
+        <button id="btn-brief-go">Assume Command</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen hidden gone" id="screen-help">
+    <div class="screen-inner">
+      <div class="title-block" style="margin-bottom:20px"><h1 style="font-size:30px">CONTROLS &amp; DOCTRINE</h1></div>
+      <div class="brief-wrap">
+        <div class="brief" id="help-body"></div>
+        <div class="scroll-more">▼  SCROLL FOR MORE  ▼</div>
+      </div>
+      <div class="menu-btns"><button class="ghost" id="btn-help-close">Back</button></div>
+    </div>
+  </div>
+
+  <div class="screen hidden gone" id="screen-debrief">
+    <div class="screen-inner">
+      <div class="title-block" style="margin-bottom:18px">
+        <h1 style="font-size:34px" id="db-title">DEBRIEF</h1>
+        <h2 id="db-sub"></h2>
+      </div>
+      <div class="brief-wrap">
+        <div class="brief" id="db-body"></div>
+        <div class="scroll-more">▼  SCROLL FOR MORE  ▼</div>
+      </div>
+      <div class="menu-btns">
+        <button id="btn-db-again">Run It Again</button>
+        <button class="ghost" id="btn-db-menu">Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div class="title-block"><h1 style="font-size:38px">MERIDIAN</h1><h2>OVER THE HORIZON</h2></div>
+    <div class="bar"><i id="load-bar"></i></div>
+    <div class="lbl" id="load-lbl">INITIALISING</div>
+  </div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

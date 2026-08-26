@@ -1,0 +1,772 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   MERIDIAN: OVER THE HORIZON — interface
+   A combat information centre, not a video-game menu: dense, monospaced,
+   high-contrast where it matters and quiet everywhere else. Everything is
+   translucent over the sea so the player never fully loses the world.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --bg: #04080c;
+  --panel: rgba(8, 14, 20, 0.80);
+  --panel-solid: #0a1119;
+  --panel-hi: rgba(18, 30, 42, 0.92);
+  --line: rgba(122, 178, 214, 0.16);
+  --line-hi: rgba(122, 200, 255, 0.42);
+  --txt: #cddfee;
+  --txt-hi: #f0f7ff;
+  --dim: #7d93a6;
+  --dimmer: #536676;
+  --accent: #5ec8ff;
+  --accent-dim: rgba(94, 200, 255, 0.16);
+  --warn: #ffc046;
+  --danger: #ff5f56;
+  --good: #5fdc8b;
+  --hostile: #ff5f56;
+  --neutral: #5fdc8b;
+  --unknown: #ffd23f;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%; overflow: hidden;
+  background: var(--bg);
+  color: var(--txt);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+#app { position: fixed; inset: 0; }
+#gl { position: fixed; inset: 0; display: block; }
+#overlay { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+
+/* FULL-BLEED WORLD, FLOATING HUD.
+   The interface used to occupy real grid columns, so the 3-D view was a boxed
+   panel in the middle of an application window with opaque chrome on all four
+   sides — roughly 55% of the screen. Every reference title in this genre runs
+   the world edge to edge and floats the instruments over it. The panels keep
+   their widths; they simply stop taking the space away from the sea. */
+#hud {
+  position: fixed; inset: 0; z-index: 10;
+  transition: opacity .5s ease;
+  pointer-events: none;
+  font-size: 12px;
+}
+#topbar { position: absolute; top: 0; left: 0; right: 0; height: 44px; }
+#left {
+  position: absolute; left: 0; top: 52px; bottom: 104px; width: 288px;
+  display: flex; flex-direction: column; gap: 8px; padding: 0 8px; min-height: 0;
+}
+#right {
+  position: absolute; right: 0; top: 52px; bottom: 104px; width: 316px;
+  display: flex; flex-direction: column; gap: 8px; padding: 0 8px; min-height: 0;
+}
+#center { position: absolute; inset: 44px 0 96px; pointer-events: none; }
+#bottom { position: absolute; left: 0; right: 0; bottom: 0; }
+/* Floating panels sit ON the sea, so they need to read against anything —
+   bright sky, dark water, a fireball — without becoming opaque boxes. */
+#left .panel, #right .panel, #bottom .panel {
+  background: linear-gradient(180deg, rgba(6,13,20,0.90), rgba(5,11,17,0.82));
+  box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+}
+#hud > * { pointer-events: auto; }
+#hud .passthrough { pointer-events: none; }
+
+/* ── responsive: the columns are fixed-width, so below about 1100px they add up
+   to more than the viewport and the panels start overlapping the plot. Step them
+   down, then collapse to a single column with the panels as translucent overlays
+   so the tactical plot always keeps the middle of the screen. ────────────────── */
+@media (max-width: 1240px) {
+  #hud { font-size: 11.5px; }
+  #left { width: 250px; }
+  #right { width: 276px; }
+  #signals { width: 296px; }
+}
+@media (max-width: 1040px) {
+  #hud { font-size: 11px; }
+  #left { width: 216px; }
+  #right { width: 238px; }
+  #topbar .seg { padding: 0 9px; font-size: 10px; }
+  #signals { width: 258px; }
+}
+@media (max-width: 880px) {
+  #left, #right { top: 50px; bottom: 96px; width: 208px; }
+  #signals { top: 50px; right: 218px; width: 220px; }
+  #topbar .seg.hide-sm { display: none; }
+}
+@media (max-width: 620px) {
+  #left { display: none; }
+  #right { width: min(200px, 54vw); }
+  #signals { right: 4px; top: 200px; width: min(190px, 52vw); }
+  #bottom { font-size: 9.5px; }
+  #hint-bar { font-size: 9.5px; max-width: 92vw; }
+}
+
+/* ── generic panel chrome ─────────────────────────────────────────────────── */
+.panel {
+  background: var(--panel);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  border: 1px solid var(--line);
+  position: relative;
+}
+.panel::before, .panel::after {
+  content: ''; position: absolute; width: 8px; height: 8px;
+  border-color: var(--line-hi); border-style: solid; pointer-events: none;
+}
+.panel::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+.panel::after { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+
+.panel-h {
+  font-family: var(--mono);
+  font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--dim);
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(180deg, rgba(94,200,255,0.05), rgba(94,200,255,0));
+}
+.panel-h .n { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* ── top bar ──────────────────────────────────────────────────────────────── */
+#topbar {
+  display: flex; align-items: stretch;
+  background: linear-gradient(180deg, rgba(6,11,16,0.94), rgba(6,11,16,0.72));
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+#topbar .seg {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 14px; border-right: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px;
+}
+#topbar .seg.grow { flex: 1; border-right: none; min-width: 0; overflow: hidden; }
+#topbar .seg.grow .v { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#topbar .seg { white-space: nowrap; }
+#topbar .brand {
+  font-family: var(--sans); font-weight: 700; letter-spacing: 0.22em;
+  font-size: 12px; color: var(--txt-hi);
+}
+#topbar .brand span { color: var(--accent); font-weight: 400; }
+.k { color: var(--dimmer); font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.v { color: var(--txt-hi); font-variant-numeric: tabular-nums; }
+#clock { font-size: 15px; letter-spacing: 0.06em; color: var(--txt-hi); font-variant-numeric: tabular-nums; }
+
+.tc-btns { display: flex; gap: 2px; }
+.tc-btns button {
+  font-family: var(--mono); font-size: 10px; min-width: 30px;
+  background: rgba(255,255,255,0.03); color: var(--dim);
+  border: 1px solid var(--line); padding: 3px 5px; cursor: pointer;
+  transition: all .12s;
+}
+.tc-btns button:hover { color: var(--txt-hi); border-color: var(--line-hi); }
+.tc-btns button.on { background: var(--accent-dim); color: var(--accent); border-color: var(--line-hi); }
+
+#phase-pill {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
+  padding: 4px 10px; border: 1px solid var(--line-hi); color: var(--accent);
+  background: var(--accent-dim);
+}
+#phase-pill.defend { color: var(--danger); border-color: rgba(255,95,86,0.5); background: rgba(255,95,86,0.12);
+  animation: pulse 1.1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .55 } }
+
+/* ── side columns ─────────────────────────────────────────────────────────── */
+
+.scroll { overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.scroll::-webkit-scrollbar { width: 6px; }
+.scroll::-webkit-scrollbar-thumb { background: rgba(122,178,214,0.25); }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+
+/* ── force list ───────────────────────────────────────────────────────────── */
+#force { flex: 3 1 0; display: flex; flex-direction: column; min-height: 120px; }
+#force-list { padding: 3px; }
+.unit-row {
+  display: grid; grid-template-columns: 16px 1fr auto;
+  gap: 6px; align-items: center;
+  padding: 5px 6px; cursor: pointer;
+  border-left: 2px solid transparent;
+  font-family: var(--mono); font-size: 11px;
+  transition: background .1s;
+}
+.unit-row:hover { background: rgba(94,200,255,0.06); }
+.app6 { vertical-align: -2px; }
+.unit-row .glyph { display: flex; align-items: center; justify-content: center; }
+.unit-row.sel { background: rgba(94,200,255,0.13); border-left-color: var(--accent); }
+.unit-row.dead { opacity: .32; text-decoration: line-through; cursor: default; }
+.unit-row .nm { color: var(--txt-hi); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.unit-row .sub { color: var(--dimmer); font-size: 9.5px; letter-spacing: .06em; }
+.unit-row .glyph { font-size: 13px; text-align: center; color: var(--accent); }
+.unit-row .em { font-size: 9px; padding: 1px 4px; border: 1px solid currentColor; letter-spacing: .08em; }
+/* A healthy ship should not shout. Six saturated green bars were the loudest
+   thing in the left panel and carried no information, because they were all
+   identical. Undamaged reads as a quiet slate line; damage is what earns colour. */
+.hbar { height: 2px; background: rgba(255,255,255,0.07); margin-top: 3px; }
+.hbar i {
+  display: block; height: 100%;
+  background: rgba(122,178,214,0.35);
+  transition: width .3s, background .3s;
+}
+.hbar i.hurt { background: var(--warn); box-shadow: 0 0 6px rgba(255,209,102,0.4); }
+.hbar i.crit { background: var(--danger); box-shadow: 0 0 8px rgba(255,95,86,0.55); }
+
+/* ── comms ────────────────────────────────────────────────────────────────── */
+#comms { flex: 2 1 0; display: flex; flex-direction: column; min-height: 110px; max-height: 42vh; }
+#comms-list { padding: 4px 8px 8px; font-family: var(--mono); font-size: 10.5px; line-height: 1.42; }
+.msg { margin-bottom: 6px; opacity: 0; animation: fadein .35s forwards; }
+@keyframes fadein { to { opacity: 1 } }
+.msg .hd { color: var(--dimmer); font-size: 9px; letter-spacing: .1em; }
+.msg .hd .rep {
+  margin-left: 6px; padding: 0 4px; border: 1px solid currentColor;
+  color: var(--warn); font-size: 8.5px; letter-spacing: .06em;
+}
+.msg .hd b { color: var(--accent); font-weight: 500; }
+.msg .bd { color: var(--txt); }
+.msg.FLASH .hd b { color: var(--danger); }
+.msg.FLASH .bd { color: #ffd9d6; }
+.msg.PRIORITY .hd b { color: var(--warn); }
+.msg.hint { border-left: 2px solid rgba(94,200,255,0.5); padding-left: 7px; }
+.msg.hint .bd { color: #d8ecff; font-style: italic; }
+
+/* ── contacts ─────────────────────────────────────────────────────────────── */
+#contacts { flex: 2 1 0; display: flex; flex-direction: column; min-height: 110px; }
+#contact-list { padding: 3px; }
+.trk-row {
+  padding: 5px 7px; cursor: pointer; font-family: var(--mono); font-size: 11px;
+  border-left: 2px solid transparent; display: grid;
+  grid-template-columns: 1fr auto; gap: 4px; align-items: center;
+}
+.trk-row:hover { background: rgba(255,255,255,0.05); }
+.trk-row.sel { background: rgba(255,255,255,0.10); border-left-color: currentColor; }
+.trk-row .id { color: var(--txt-hi); }
+.trk-row .cl { color: var(--dimmer); font-size: 9.5px; letter-spacing: .04em; }
+.tqchip {
+  font-size: 9px; padding: 1px 5px; border: 1px solid currentColor;
+  letter-spacing: .06em; white-space: nowrap;
+}
+.stale { opacity: .45; }
+
+/* ── track detail / engagement ────────────────────────────────────────────── */
+#detail { flex: 3 1 0; min-height: 150px; display: flex; flex-direction: column; }
+#detail-body { padding: 9px 10px 11px; font-family: var(--mono); font-size: 11px; }
+.kv { display: grid; grid-template-columns: 94px 1fr; gap: 3px 8px; margin-bottom: 8px; }
+.kv .k { align-self: center; }
+.kv .v { color: var(--txt-hi); }
+.meter { height: 4px; background: rgba(255,255,255,0.08); margin: 5px 0 3px; position: relative; overflow: hidden; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--accent); }
+.meter.tq i { background: linear-gradient(90deg, var(--danger), var(--warn), var(--good)); }
+.meter .thresh { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #fff; opacity: .75; }
+
+.web-list { margin-top: 6px; }
+.web-item {
+  display: flex; align-items: center; gap: 6px; padding: 3px 0;
+  font-size: 10px; color: var(--dim);
+}
+.web-item .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: 0 0 auto; }
+.web-item .dot.local { background: var(--warn); }
+.web-item b { color: var(--txt); font-weight: 500; }
+
+button.act {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; width: 100%;
+  background: rgba(94,200,255,0.10); color: var(--accent);
+  border: 1px solid var(--line-hi); padding: 7px; cursor: pointer;
+  transition: all .12s; margin-top: 8px;
+}
+button.act:hover:not(:disabled) { background: rgba(94,200,255,0.22); color: var(--txt-hi); }
+button.act:disabled { opacity: .32; cursor: not-allowed; }
+button.act.danger { background: rgba(255,95,86,0.12); color: var(--danger); border-color: rgba(255,95,86,0.45); }
+button.act.danger:hover:not(:disabled) { background: rgba(255,95,86,0.26); color: #fff; }
+
+/* ── bottom order bar ─────────────────────────────────────────────────────── */
+/* The order bar is a strip, not a panel: it must never eat a third of the
+   screen, because the plot behind it is the game. */
+#bottom { padding: 0 8px 8px; display: flex; gap: 8px; align-items: flex-end; }
+#orders-body { overflow-x: auto; overflow-y: hidden; }
+#orders { max-height: 146px; display: flex; flex-direction: column; }
+#orders { flex: 1; }
+#orders-body { display: flex; align-items: stretch; gap: 0; }
+.ord-group {
+  padding: 6px 10px; border-right: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px; justify-content: center;
+}
+.ord-group:last-child { border-right: none; }
+.ord-group > .k { margin-bottom: 1px; }
+.ord-group .sel-sub { max-width: 260px; white-space: normal; line-height: 1.4; }
+.btn-row { display: flex; gap: 3px; }
+.btn-row button {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .05em;
+  background: rgba(255,255,255,0.035); color: var(--dim);
+  border: 1px solid var(--line); padding: 4px 7px; cursor: pointer; transition: all .12s;
+  white-space: nowrap;
+}
+.btn-row button:hover:not(:disabled) { color: var(--txt-hi); border-color: var(--line-hi); background: rgba(255,255,255,0.08); }
+.btn-row button.on { background: var(--accent-dim); color: var(--accent); border-color: var(--line-hi); }
+.btn-row button:disabled { opacity: .3; cursor: not-allowed; }
+.btn-row button.emc-SILENT.on { background: rgba(74,214,160,0.16); color: #4ad6a0; border-color: rgba(74,214,160,0.5); }
+.btn-row button.emc-PASSIVE.on { background: rgba(127,212,255,0.16); color: #7fd4ff; border-color: rgba(127,212,255,0.5); }
+.btn-row button.emc-RESTRICTED.on { background: rgba(255,209,102,0.16); color: #ffd166; border-color: rgba(255,209,102,0.5); }
+.btn-row button.emc-FULL.on { background: rgba(255,107,107,0.16); color: #ff6b6b; border-color: rgba(255,107,107,0.5); }
+
+.sel-title { font-family: var(--mono); font-size: 12px; color: var(--txt-hi); letter-spacing: .06em; }
+.sel-sub { font-family: var(--mono); font-size: 9.5px; color: var(--dimmer); letter-spacing: .07em; }
+
+.mag { display: flex; gap: 6px 10px; flex-wrap: wrap; max-width: 300px; max-height: 44px; overflow: hidden; }
+.mag .m { font-family: var(--mono); font-size: 9.5px; color: var(--dim); }
+.mag .m b { color: var(--txt-hi); font-weight: 500; }
+.mag .m.empty { opacity: .35; }
+
+/* ── centre-screen elements ───────────────────────────────────────────────── */
+#alerts {
+  position: absolute; top: 48px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 5px; align-items: center; pointer-events: none;
+  max-width: 54%;
+}
+.alert {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+  padding: 5px 14px; border: 1px solid rgba(255,95,86,0.75); color: #ffe6e3;
+  border-left-width: 3px;
+  background: rgba(58,12,10,0.75); backdrop-filter: blur(6px);
+  animation: alertin .25s ease-out; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.alert.warn { border-color: var(--warn); background: rgba(120,80,10,0.55); }
+.alert.info { border-color: var(--line-hi); background: rgba(10,40,60,0.6); }
+@keyframes alertin { from { opacity: 0; transform: translateY(-8px) } }
+
+/* ── signal traffic: decisions the watch is waiting on ─────────────────── */
+/* Docked over the SEA, inboard of the contact panel. A decision card that
+   covers the tactical picture takes away the display the decision is about at
+   exactly the moment it is needed. */
+#signals {
+  position: absolute; top: 52px; right: 338px;
+  display: flex; flex-direction: column; gap: 8px; align-items: stretch;
+  width: 330px; pointer-events: auto; z-index: 6;
+}
+.sig {
+  font-family: var(--mono);
+  background: linear-gradient(180deg, rgba(14,26,38,0.96), rgba(7,15,22,0.94));
+  border: 1px solid var(--line-hi); border-left: 3px solid var(--accent);
+  border-radius: 2px;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 18px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  animation: sigin .34s cubic-bezier(.2,.8,.3,1);
+  overflow: hidden;
+}
+@keyframes sigin { from { opacity: 0; transform: translateX(26px) } }
+.sig.out { animation: sigout .3s ease-in forwards; }
+@keyframes sigout { to { opacity: 0; transform: translateX(26px); max-height: 0; } }
+.sig.flash { border-left-color: #ff5f56; }
+.sig.priority { border-left-color: var(--warn); }
+.sig-h {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  padding: 6px 10px 4px; border-bottom: 1px solid var(--line);
+  font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+}
+.sig-h .from { color: var(--txt-hi); }
+.sig-h .pri { color: var(--dimmer); }
+.sig.flash .sig-h .pri { color: #ff8b84; }
+.sig-sub { padding: 6px 10px 0; font-size: 9.5px; letter-spacing: .12em; color: var(--accent); text-transform: uppercase; }
+.sig-b { padding: 5px 10px 8px; font-size: 10.5px; line-height: 1.62; color: var(--txt); }
+.sig-d { padding: 0 10px 8px; font-size: 9.5px; line-height: 1.6; color: var(--dimmer); font-style: italic; }
+.sig-opts { display: flex; flex-direction: column; gap: 1px; background: var(--line); }
+.sig-opts button {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .05em; text-align: left;
+  padding: 9px 11px; background: rgba(16,32,45,0.95); color: var(--txt-hi);
+  border: 1px solid rgba(122,178,214,0.22); border-left: 2px solid var(--accent);
+  cursor: pointer; transition: background .12s, color .12s, border-color .12s;
+}
+.sig.flash .sig-opts button { border-left-color: #ff5f56; }
+.sig-opts button:hover { background: rgba(30,72,102,0.95); color: #fff; }
+.sig-opts button .oh { display: block; color: var(--dimmer); font-size: 9px; margin-top: 2px; letter-spacing: .02em; }
+.sig-opts button:hover .oh { color: #b6d6ea; }
+.sig-foot {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 10px; font-size: 9px; letter-spacing: .12em;
+  color: var(--dimmer); border-top: 1px solid var(--line);
+}
+.sig-clock { color: var(--warn); font-variant-numeric: tabular-nums; }
+.sig-clock.urgent { color: #ff6b6b; animation: sigpulse 1s steps(2) infinite; }
+@keyframes sigpulse { 50% { opacity: 0.35 } }
+.sig-timer { height: 3px; background: var(--accent); transition: width .3s linear; }
+.sig.flash .sig-timer { background: #ff5f56; }
+
+#hint-bar {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 11px; color: var(--dim);
+  background: rgba(6,12,18,0.72); border: 1px solid var(--line);
+  padding: 6px 14px; letter-spacing: .05em; max-width: 720px; text-align: center;
+  backdrop-filter: blur(8px); pointer-events: none;
+}
+#hint-bar b { color: var(--accent); font-weight: 500; }
+
+#cam-tag {
+  /* Centred under the status bar. At left:14px it sat directly on top of the
+     TASK FORCE panel's header, printing two overlapping lines of type in the
+     corner of every frame. */
+  position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+  color: var(--dim); background: rgba(6,12,18,0.6); border: 1px solid var(--line);
+  padding: 5px 10px; pointer-events: none;
+}
+#cam-tag b { color: var(--accent); }
+
+#missile-cam {
+  position: absolute; inset: 0; pointer-events: none;
+  display: none;
+}
+#missile-cam.on { display: block; }
+#missile-cam .frame { position: absolute; inset: 26px 26px 26px 26px; border: 1px solid rgba(255,170,80,0.35); }
+#missile-cam .frame::before, #missile-cam .frame::after {
+  content: ''; position: absolute; width: 26px; height: 26px; border: 2px solid rgba(255,170,80,0.8);
+}
+#missile-cam .frame::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+#missile-cam .frame::after { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+#missile-cam .tag {
+  position: absolute; top: 36px; left: 40px; font-family: var(--mono); font-size: 11px;
+  color: #ffb84d; letter-spacing: .18em;
+}
+#missile-cam .tag .rec { color: var(--danger); animation: pulse 1s infinite; }
+#missile-cam .data {
+  position: absolute; bottom: 40px; left: 40px; font-family: var(--mono);
+  font-size: 11px; color: #ffd9a8; line-height: 1.6; letter-spacing: .06em;
+}
+#missile-cam .reticle {
+  position: absolute; top: 50%; left: 50%; width: 120px; height: 120px;
+  transform: translate(-50%,-50%); pointer-events: none;
+}
+
+/* ── bridge / first person ────────────────────────────────────────────────── */
+#bridge-hud { position: absolute; inset: 0; display: none; pointer-events: none; }
+#bridge-hud.on { display: block; }
+#bridge-hud .vignette {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.55) 100%);
+}
+#compass-strip {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  width: 520px; height: 30px; overflow: hidden;
+  border-top: 1px solid rgba(180,220,240,0.30); border-bottom: 1px solid rgba(180,220,240,0.30);
+  background: linear-gradient(90deg, rgba(4,10,16,0), rgba(4,10,16,0.55) 18%, rgba(4,10,16,0.55) 82%, rgba(4,10,16,0));
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+#compass-strip canvas { transform: translateY(-6px) scale(0.93); transform-origin: top center; }
+#compass-strip canvas { display: block; }
+#bridge-instruments {
+  position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 14px; align-items: flex-end;
+  font-family: var(--mono);
+}
+.gauge {
+  background: rgba(6,12,18,0.72); border: 1px solid var(--line);
+  padding: 8px 14px; text-align: center; min-width: 108px;
+  backdrop-filter: blur(8px);
+}
+.gauge .k { font-size: 9px; }
+.gauge .g { font-size: 22px; color: var(--txt-hi); font-variant-numeric: tabular-nums; letter-spacing: .04em; }
+.gauge .g small { font-size: 11px; color: var(--dim); }
+.telegraph { display: flex; flex-direction: column-reverse; gap: 2px; }
+.telegraph div {
+  font-size: 9px; letter-spacing: .1em; padding: 2px 8px; color: var(--dimmer);
+  border-left: 2px solid transparent;
+}
+.telegraph div.on { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); }
+
+/* ── modal screens ────────────────────────────────────────────────────────── */
+.screen {
+  position: fixed; inset: 0; z-index: 50; display: flex;
+  align-items: center; justify-content: center;
+  /* A scrim, not a blackout. The menu sits over a live shot of the task force,
+     so the gradient only has to buy the type enough contrast: nearly clear
+     through the middle band where the sea is, heavy at top and bottom where the
+     title and the buttons are. */
+  background:
+    linear-gradient(180deg, rgba(2,6,10,0.86) 0%, rgba(3,8,13,0.42) 30%,
+                    rgba(3,8,13,0.30) 58%, rgba(2,5,8,0.86) 100%),
+    radial-gradient(ellipse at 50% 45%, rgba(6,16,26,0.10), rgba(2,5,8,0.55));
+  backdrop-filter: blur(2.5px);
+  /* Screens cross-fade. A hard cut between the briefing and the plot is the
+     single cheapest way to make a game feel unfinished, and the blur easing off
+     as the screen clears reads as the camera pulling focus onto the sea. */
+  opacity: 1;
+  transition: opacity .55s cubic-bezier(.4,0,.2,1), backdrop-filter .55s ease;
+}
+.screen.hidden { opacity: 0; pointer-events: none; backdrop-filter: blur(0px); }
+.screen.gone { display: none; }
+.screen-inner {
+  width: min(980px, 92vw); max-height: 92vh; display: flex; flex-direction: column;
+  padding: 2vh 0;
+  transition: opacity .45s ease, transform .55s cubic-bezier(.2,.8,.25,1);
+}
+.screen.hidden .screen-inner { opacity: 0; transform: translateY(-14px) scale(0.985); }
+
+/* The HUD arrives the same way: panels slide in from their own edge, staggered,
+   rather than the entire interface snapping into existence in one frame. */
+#hud.entering #left { animation: hudL .55s cubic-bezier(.2,.8,.25,1) both; }
+#hud.entering #right { animation: hudR .55s cubic-bezier(.2,.8,.25,1) .07s both; }
+#hud.entering #topbar { animation: hudT .5s cubic-bezier(.2,.8,.25,1) both; }
+#hud.entering #bottom { animation: hudB .55s cubic-bezier(.2,.8,.25,1) .12s both; }
+@keyframes hudL { from { opacity: 0; transform: translateX(-26px) } }
+@keyframes hudR { from { opacity: 0; transform: translateX(26px) } }
+@keyframes hudT { from { opacity: 0; transform: translateY(-100%) } }
+@keyframes hudB { from { opacity: 0; transform: translateY(30px) } }
+
+.title-block { text-align: center; margin-bottom: 30px; }
+.logomark { display: block; margin: 0 auto 14px; filter: drop-shadow(0 0 22px rgba(94,200,255,0.28)); }
+.brandmark { vertical-align: -3px; margin-right: 8px; opacity: 0.85; }
+.title-block h1 {
+  /* Scales with the viewport so the wordmark never runs off the edge on a
+     narrow window — the tracking is wide enough that a fixed size overflows
+     well before the rest of the layout does. */
+  font-family: var(--sans); font-weight: 200;
+  font-size: clamp(24px, 5.4vw, 54px); letter-spacing: 0.34em;
+  margin: 0; color: var(--txt-hi); text-indent: 0.34em;
+}
+.title-block h2 {
+  font-family: var(--mono); font-weight: 400;
+  font-size: clamp(9px, 1.4vw, 13px); letter-spacing: 0.52em;
+  margin: 10px 0 0; color: var(--accent); text-indent: 0.52em;
+}
+.title-block .rule {
+  width: 220px; height: 1px; margin: 22px auto 0;
+  background: linear-gradient(90deg, transparent, var(--line-hi), transparent);
+}
+
+/* The briefing and the debrief both overflow, and both used to give no sign of
+   it: the order of battle was severed mid-row and the after-action scoring ran
+   off the bottom with the ASSUME COMMAND button sitting directly under the cut,
+   so the screen read as complete. Give them room, a visible scrollbar, and a
+   fade at the bottom edge that says there is more. */
+.brief {
+  background: var(--panel); border: 1px solid var(--line); padding: 26px 30px;
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.72; color: var(--txt);
+  /* Fill whatever the screen has left instead of a fixed 60vh. The title block
+     and the buttons are laid out by the flex column above; a hard 60vh cap left
+     a fifth of the viewport empty below the panel while the last two paragraphs
+     of the briefing sat below the fold, which reads as clipped text rather than
+     as something to scroll. */
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 16px), transparent 100%);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(122,178,214,0.45) transparent;
+}
+.brief::-webkit-scrollbar { width: 9px; }
+.brief::-webkit-scrollbar-thumb {
+  background: rgba(122,178,214,0.4); border-radius: 5px;
+  border: 2px solid transparent; background-clip: content-box;
+}
+.brief::-webkit-scrollbar-thumb:hover { background: rgba(122,178,214,0.7); background-clip: content-box; }
+.brief::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+.brief h3 {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .24em; color: var(--accent);
+  margin: 0 0 14px; font-weight: 500;
+}
+.brief p { margin: 0 0 14px; }
+.brief p:last-child { margin-bottom: 0; }
+.brief .stamp { color: var(--dimmer); font-size: 10px; letter-spacing: .18em; margin-bottom: 18px; }
+
+.menu-btns { display: flex; gap: 12px; justify-content: center; margin-top: 22px; flex: 0 0 auto; }
+.menu-btns button {
+  font-family: var(--mono); font-size: 12px; letter-spacing: .2em; text-transform: uppercase;
+  background: rgba(94,200,255,0.08); color: var(--accent);
+  border: 1px solid var(--line-hi); padding: 13px 34px; cursor: pointer; transition: all .16s;
+}
+.menu-btns button:hover { background: rgba(94,200,255,0.2); color: #fff; box-shadow: 0 0 24px rgba(94,200,255,0.18); }
+.menu-btns button.ghost { background: transparent; color: var(--dim); border-color: var(--line); }
+.menu-btns button.ghost:hover { color: var(--txt-hi); border-color: var(--line-hi); box-shadow: none; }
+
+.debrief-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.score-row {
+  display: flex; justify-content: space-between; padding: 7px 0;
+  border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11.5px;
+}
+.score-row .lbl { color: var(--dim); }
+.score-row .det { color: var(--dimmer); font-size: 10px; }
+.score-row .pt { color: var(--txt-hi); font-variant-numeric: tabular-nums; }
+.score-row .pt.neg { color: var(--danger); }
+.rank {
+  font-family: var(--mono); font-size: 30px; letter-spacing: .22em; color: var(--accent);
+  text-align: center; padding: 16px 0;
+}
+.rank.good { color: #7fe0a8; }
+.rank.bad { color: #ff7a6e; }
+.rank-pts {
+  text-align: center; font-family: var(--mono); font-size: 12px;
+  letter-spacing: .16em; color: var(--dim); margin-bottom: 18px;
+}
+
+kbd {
+  font-family: var(--mono); font-size: 9.5px; background: rgba(255,255,255,0.07);
+  border: 1px solid var(--line); padding: 1px 5px; color: var(--txt);
+}
+
+.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.legend b { color: var(--txt); font-weight: 500; }
+
+/* ── engagement dialog ────────────────────────────────────────────────────── */
+#engage-modal {
+  position: fixed; inset: 0; z-index: 40; display: none;
+  align-items: center; justify-content: center; background: rgba(2,6,10,0.55);
+  backdrop-filter: blur(2px);
+}
+#engage-modal.on { display: flex; }
+#engage-box {
+  width: min(560px, 94vw); max-height: 92vh;
+  display: flex; flex-direction: column;
+  background: var(--panel-solid); border: 1px solid var(--line-hi);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+}
+#engage-box .hd, #engage-box .dlg-btns { flex: 0 0 auto; }
+#engage-box .bd { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+#engage-box .hd {
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .18em; color: var(--accent);
+  display: flex; justify-content: space-between;
+}
+#engage-box .bd { padding: 16px; font-family: var(--mono); font-size: 11.5px; }
+.wsel { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+.wsel .w {
+  display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center;
+  padding: 8px 10px; border: 1px solid var(--line); cursor: pointer; transition: all .12s;
+}
+.wsel .w:hover { border-color: var(--line-hi); background: rgba(255,255,255,0.04); }
+.wsel .w.on { border-color: var(--accent); background: var(--accent-dim); }
+.wsel .w .nm { color: var(--txt-hi); }
+.wsel .w .ds { color: var(--dimmer); font-size: 9.5px; line-height: 1.45; margin-top: 2px; }
+.wsel .w .ct { color: var(--accent); font-variant-numeric: tabular-nums; }
+.wsel .w.dis { opacity: .35; cursor: not-allowed; }
+.radio { width: 11px; height: 11px; border: 1px solid var(--dim); border-radius: 50%; position: relative; }
+.wsel .w.on .radio { border-color: var(--accent); }
+.wsel .w.on .radio::after { content:''; position: absolute; inset: 2px; border-radius: 50%; background: var(--accent); }
+
+.slider-row { display: grid; grid-template-columns: 116px 1fr 62px; gap: 10px; align-items: center; margin-bottom: 10px; }
+input[type=range] { -webkit-appearance: none; appearance: none; height: 3px; background: rgba(255,255,255,0.14); outline: none; }
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent);
+  cursor: pointer; border-radius: 0; transform: rotate(45deg);
+}
+input[type=range]::-moz-range-thumb { width: 11px; height: 11px; background: var(--accent); border: none; cursor: pointer; }
+
+.solution {
+  border: 1px solid var(--line); padding: 11px 13px; margin: 12px 0;
+  background: rgba(94,200,255,0.04);
+}
+.solution .row { display: flex; justify-content: space-between; padding: 2px 0; }
+.solution .row .k { color: var(--dim); }
+.solution .row .v { color: var(--txt-hi); }
+.solution.bad { border-color: rgba(255,95,86,0.45); background: rgba(255,95,86,0.06); }
+.warnline { color: var(--danger); font-size: 10.5px; line-height: 1.5; margin-top: 8px; }
+.okline { color: var(--good); font-size: 10.5px; line-height: 1.5; margin-top: 8px; }
+
+.dlg-btns { display: flex; gap: 8px; padding: 0 16px 16px; }
+.dlg-btns button { flex: 1; }
+
+/* ── loading ──────────────────────────────────────────────────────────────── */
+#loading {
+  position: fixed; inset: 0; z-index: 90; background: #04080c;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+}
+#loading.hidden { display: none; }
+#loading .bar { width: 260px; height: 2px; background: rgba(255,255,255,0.1); }
+#loading .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+#loading .lbl { font-family: var(--mono); font-size: 10px; letter-spacing: .24em; color: var(--dim); }
+
+@media (max-width: 1500px) {
+  #hud { grid-template-columns: 258px 1fr 292px; }
+}
+
+
+/* The briefing, debrief and controls screens are for READING, so they keep a
+   heavier scrim than the menu — the sea is still there behind them, just
+   further back. */
+#screen-brief, #screen-debrief, #screen-help {
+  background:
+    linear-gradient(180deg, rgba(2,6,10,0.96), rgba(2,5,8,0.90) 40%, rgba(2,5,8,0.96));
+  backdrop-filter: blur(6px);
+}
+
+/* The raid summary row: one line standing in for the tail of a saturation
+   attack, so a thirty-vampire raid does not push every ship off the picture. */
+.trk-row.raid {
+  cursor: default;
+  background: linear-gradient(90deg, rgba(255,107,107,0.14), rgba(255,107,107,0.03));
+  border-left: 2px solid var(--hostile);
+}
+.trk-row.raid .cl { color: rgba(255,140,140,0.75); letter-spacing: .08em; }
+
+/* Scroll affordance. The fade at the foot of a briefing tells you the text is
+   cut off; it does not tell you it can be scrolled, and a reviewer reads a faded
+   last line as clipped rather than as continued. */
+.brief-wrap { position: relative; display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.scroll-more {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 9px; letter-spacing: .2em;
+  color: var(--accent); opacity: 0.85; pointer-events: none;
+  text-shadow: 0 0 10px rgba(2,6,10,0.95), 0 2px 6px rgba(2,6,10,0.95);
+  transition: opacity .25s;
+}
+.scroll-more.at-end { opacity: 0; }
+
+/* Performance readout. Off by default; F toggles it. There is no way to tune a
+   real-time renderer without being able to see the number it produces, and a
+   number the PLAYER can read is the only one that counts — a headless capture
+   harness measures nothing about the frame the game actually presents. */
+#perf {
+  /* Directly under the camera tag in the centre column. At right:14px it was
+     drawn UNDERNEATH the tactical picture panel — the whole point of a frame
+     readout is that you can read it. z-index above the panels for the same
+     reason. */
+  position: absolute; top: 42px; left: 50%; transform: translateX(-50%);
+  display: none; z-index: 30;
+  gap: 4px; align-items: baseline;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .06em;
+  color: var(--txt-hi); background: rgba(6,12,18,0.72);
+  border: 1px solid var(--line); padding: 4px 9px; pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+#perf.on { display: flex; }
+#perf .u { color: var(--dimmer); font-size: 9px; margin-right: 6px; }
+#perf.warn #perf-fps { color: var(--warn); }
+#perf.bad #perf-fps { color: var(--danger); }
+#perf-res { color: var(--dim); font-size: 9px; }
+
+
+/* ── cheap UI compositing ──────────────────────────────────────────────────
+   backdrop-filter is the most expensive thing the INTERFACE does, and it is
+   invisible in any JavaScript profile: the blur runs on the compositor, so it
+   inflates the real frame interval while every timer in the game still reports
+   a fast frame. Ten blurred layers stacked over a full-screen WebGL canvas that
+   changes every frame means the compositor re-reads and re-blurs the backdrop
+   behind each panel, sixty times a second, at full device resolution.
+
+   The panels are already 82-90% opaque, so the blur behind them contributes
+   very little. Below High it is dropped entirely and the panels go a little more
+   opaque to compensate — which costs almost nothing visually and can be the
+   difference between a smooth frame and a slideshow on integrated graphics. */
+body.cheap-ui .panel,
+body.cheap-ui #topbar,
+body.cheap-ui .sig,
+body.cheap-ui #alerts > div,
+body.cheap-ui #cam-tag,
+body.cheap-ui #hint-bar,
+body.cheap-ui #missile-cam,
+body.cheap-ui #engage-box,
+body.cheap-ui .screen,
+body.cheap-ui #perf {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+body.cheap-ui #left .panel,
+body.cheap-ui #right .panel,
+body.cheap-ui #bottom .panel {
+  background: linear-gradient(180deg, rgba(6,13,20,0.96), rgba(5,11,17,0.94));
+}
+body.cheap-ui #topbar {
+  background: linear-gradient(180deg, rgba(6,11,16,0.98), rgba(6,11,16,0.92));
+}
