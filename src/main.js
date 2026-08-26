@@ -195,13 +195,30 @@ class Game {
     c.addEventListener('contextmenu', e => e.preventDefault());
 
     c.addEventListener('pointerdown', (e) => {
-      c.setPointerCapture(e.pointerId);
+      // Pointer capture is a nicety, not a requirement — it keeps a drag alive if
+      // the pointer leaves the canvas. It THROWS for a pointer id the browser
+      // does not consider active, and because it was the first statement in this
+      // handler, that throw aborted the whole thing: no drag state was set, so
+      // the matching pointerup did nothing and the click was swallowed. Losing
+      // capture is survivable; losing every click is not.
+      try { c.setPointerCapture(e.pointerId); } catch (err) { /* capture is optional */ }
       lastX = e.clientX; lastY = e.clientY; downX = e.clientX; downY = e.clientY; moved = 0;
       if (e.button === 2) dragging = 'orbit';
       else if (e.button === 1) dragging = 'pan';
-      else {
+      else if (e.shiftKey) {
+        // Shift is the box-select modifier now — see below.
         dragging = 'select';
         this.overlay.dragBox = { x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY };
+      } else {
+        // LEFT-DRAG PANS THE PLOT.
+        //
+        // Panning used to be middle-drag only, which on a laptop trackpad is no
+        // button at all — so on the machine this is played on there was no way
+        // to move the view except the arrow keys. Dragging the map with the
+        // primary button is what every map application does, and a plot is a
+        // map. A left press that does not move is still a click, so selection
+        // is unaffected; box-select moves to shift-drag.
+        dragging = 'pan';
       }
     });
 
@@ -228,6 +245,10 @@ class Game {
       const box = this.overlay.dragBox;
       dragging = null;
       this.overlay.dragBox = null;
+      if (wasDrag === 'pan' && e.button === 0) {
+        if (moved <= 8) this._click(e, false);   // a press that didn't move is a click
+        return;
+      }
       if (wasDrag === 'select') {
         if (moved > 8 && box) {
           const hits = this.overlay.pickInBox(box.x0, box.y0, box.x1, box.y1)
@@ -729,15 +750,15 @@ class Game {
     $('help-body').innerHTML = `
       <h3>CAMERA</h3>
       <div class="legend">
-        <div><b>Right-drag</b> orbit the plot</div><div><b>Wheel</b> zoom · sea level to 260 km</div>
-        <div><b>Middle-drag</b> pan</div><div><b>M</b> snap between chart and sea</div>
+        <div><b>Left-drag</b> pan the plot</div><div><b>Wheel</b> zoom · sea level to 260 km</div>
+        <div><b>Right-drag</b> orbit</div><div><b>Arrows</b> pan · <b>M</b> chart / sea</div>
         <div><b>F</b> follow selected unit</div><div><b>B</b> take the bridge (ships only)</div>
         <div><b>V</b> ride a weapon</div><div><b>Tab</b> cycle own units</div>
       </div>
       <h3 style="margin-top:20px">COMMAND</h3>
       <div class="legend">
         <div><b>Click</b> select unit or contact</div><div><b>Double-click</b> go to it — on the plot or in a panel</div>
-        <div><b>Drag box</b> select several</div><div><b>Double-click sea</b> zoom in there</div>
+        <div><b>Shift + drag</b> box-select several</div><div><b>Double-click sea</b> zoom in there</div>
         <div><b>Right-click sea</b> steer there</div><div><b>Shift + click</b> queue waypoints</div>
         <div><b>1 2 3 4</b> EMCON alpha → delta</div><div><b>E</b> engage designated track</div>
         <div><b>G</b> set course mode</div><div><b>Space</b> pause · number keys on the bar for time</div>
@@ -1125,8 +1146,13 @@ class Game {
     const sp = this.cam.dist * 0.85 * dt;
     if (k.has('ArrowUp')) vz += sp;
     if (k.has('ArrowDown')) vz -= sp;
-    if (k.has('ArrowLeft')) vx -= sp;
-    if (k.has('ArrowRight')) vx += sp;
+    // Left and right were the wrong way round: pressing Right walked the view
+    // left. The sign here has to match the mouse-pan convention a few lines up
+    // in CameraDirector.pan(), which negates dx because dragging the map moves
+    // the world WITH the pointer — the opposite sense to a key that moves the
+    // CAMERA.
+    if (k.has('ArrowLeft')) vx += sp;
+    if (k.has('ArrowRight')) vx -= sp;
     if (vx || vz) this.cam.panBy(vx, vz);
   }
 }
