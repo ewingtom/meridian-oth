@@ -6,11 +6,44 @@ const ringGeo = new THREE.PlaneGeometry(2, 2);
 ringGeo.rotateX(-Math.PI / 2);
 
 const FIREBALL_VERT = `
+uniform float uTime;
+uniform float uProgress;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
+varying float vBulge;
+
+float fbHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float fbNoise(vec3 x) {
+  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(fbHash(i + vec3(0,0,0)), fbHash(i + vec3(1,0,0)), f.x),
+                  mix(fbHash(i + vec3(0,1,0)), fbHash(i + vec3(1,1,0)), f.x), f.y),
+              mix(mix(fbHash(i + vec3(0,0,1)), fbHash(i + vec3(1,0,1)), f.x),
+                  mix(fbHash(i + vec3(0,1,1)), fbHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+
 void main() {
+  // DISPLACE THE SILHOUETTE.
+  //
+  // A sphere with turbulence painted on it is still a sphere: from outside, all
+  // you see is a hard circular outline with some noise inside it, which is
+  // exactly why an art review called these flat circular billboards. The
+  // turbulence has to be in the GEOMETRY, because the outline is what the eye
+  // reads first and it is the only part that says "explosion" rather than
+  // "textured ball".
+  //
+  // Two octaves of 3-D noise pushed along the normal, evolving over the life of
+  // the blast. The displacement is handed to the fragment stage so the lobes
+  // that stick out furthest also burn brightest.
+  float n1 = fbNoise(normal * 2.6 + uTime * 1.7);
+  float n2 = fbNoise(normal * 5.9 - uTime * 2.3);
+  float bulge = (n1 - 0.5) * 0.62 + (n2 - 0.5) * 0.28;
+  // Early on the blast is a tight ball; as it expands it tears itself apart.
+  bulge *= mix(0.45, 1.35, uProgress);
+  vBulge = bulge;
+
+  vec3 p = position * (1.0 + bulge);
   vNormal = normalize(normalMatrix * normal);
-  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vec4 wp = modelMatrix * vec4(p, 1.0);
   vWorldPos = wp.xyz;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
@@ -23,6 +56,7 @@ uniform vec3 uColorHot;
 uniform vec3 uColorCore;
 varying vec3 vNormal;
 varying vec3 vWorldPos;
+varying float vBulge;
 float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float noise(vec3 x) {
   vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
@@ -50,7 +84,14 @@ void main() {
   // A warhead going into a cruiser has to READ as one at three hundred metres.
   // At a peak of 0.62 the fireball washed out against a bright hull and a bright
   // sea and the whole detonation came back as a candle flame on the deck.
+  // The parts that bulge outward are the hot rising billows; the hollows between
+  // them are cooler and thinner. Tying brightness to the displacement is what
+  // makes the lumps read as volume rather than as a bumpy texture.
+  color *= 0.72 + vBulge * 1.5;
   float alpha = mix(0.30, 0.92, turb) * (1.0 - uProgress) * mix(0.5, 1.0, fresnel);
+  // Thin the hollows out entirely, so the SILHOUETTE is genuinely broken rather
+  // than being a circle with texture inside it.
+  alpha *= smoothstep(-0.42, 0.05, vBulge);
   gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
 }
 `;
@@ -167,9 +208,37 @@ export class Explosion {
       blending: THREE.AdditiveBlending,
       side: THREE.FrontSide,
     });
-    this.fireMesh = new THREE.Mesh(fireballGeo, this.fireMat);
+    // A CLUSTER, not a ball.
+    //
+    // One sphere is one silhouette, and no amount of shading inside it changes
+    // that. A warhead detonation is several billows of burning fuel and vaporised
+    // metal expanding into each other at different rates — so build it that way:
+    // a few overlapping lobes at different offsets, scales and rates.
+    //
+    // They share one material, and the turbulence is sampled from WORLD position,
+    // so each lobe automatically gets a different pattern for free. The cost is a
+    // handful of extra draw calls for under a second.
+    this.fireMesh = new THREE.Group();
     this.fireMesh.position.copy(position);
-    this.fireMesh.scale.setScalar(0.1);
+    this.lobes = [];
+    const lobeCount = airburst ? 3 : 6;
+    for (let i = 0; i < lobeCount; i++) {
+      const m = new THREE.Mesh(fireballGeo, this.fireMat);
+      // Golden-angle scatter so the lobes never line up into a ring.
+      const a = i * 2.399963229728653;
+      const rad = i === 0 ? 0 : 0.42 + (i / lobeCount) * 0.5;
+      m.userData.dir = new THREE.Vector3(
+        Math.cos(a) * rad,
+        (i === 0 ? 0 : 0.10 + ((i * 0.37) % 1) * 0.55),
+        Math.sin(a) * rad,
+      );
+      // Each lobe grows at its own rate, so the mass keeps changing shape.
+      m.userData.rate = i === 0 ? 1.0 : 0.62 + ((i * 0.61803398875) % 1) * 0.62;
+      m.userData.size = i === 0 ? 1.0 : 0.46 + ((i * 0.7548776662) % 1) * 0.42;
+      m.rotation.set(a, a * 1.7, a * 0.6);
+      this.fireMesh.add(m);
+      this.lobes.push(m);
+    }
     scene.add(this.fireMesh);
 
     // Opaque hot core — NORMAL (not additive) blending is the point: additive
@@ -384,7 +453,15 @@ export class Explosion {
     const ft = Math.min(1, this.age / this.fireballLife);
     if (ft < 1) {
       const grow = 1 - Math.pow(1 - Math.min(1, ft * 2.2), 3);
-      this.fireMesh.scale.setScalar(THREE.MathUtils.lerp(0.6, 10, grow) * this.scale);
+      const R = THREE.MathUtils.lerp(0.6, 10, grow) * this.scale;
+      for (const m of this.lobes) {
+        const d = m.userData;
+        const lr = R * d.rate;
+        m.scale.setScalar(Math.max(0.001, lr * d.size));
+        // Lobes drift apart as the mass expands, which is what turns a ball into
+        // a billowing cloud over the life of the blast.
+        m.position.copy(d.dir).multiplyScalar(lr * 0.85);
+      }
       this.fireMat.uniforms.uTime.value = this.age;
       this.fireMat.uniforms.uProgress.value = ft;
       this.fireMesh.visible = true;
