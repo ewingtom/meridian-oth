@@ -193,6 +193,13 @@ export class SceneView {
   }
 
   setQuality(q) {
+    // Cloud march depth. Safe to vary now that the count is a UNIFORM rather
+    // than a per-pixel value — a count that changes per draw cannot draw the
+    // contour lines a per-pixel one did.
+    if (this.clouds) {
+      this.clouds.mesh.material.uniforms.uCloudSteps.value =
+        q === 'exquisite' ? 16 : q === 'high' ? 12 : q === 'medium' ? 10 : 7;
+    }
     this.quality = q;
     this.ocean.setQuality(q);
   }
@@ -410,9 +417,29 @@ export class SceneView {
       this._wxZen.lerp(_wxTmp.setHex(s.zenith), k);
       this._wxHor.lerp(_wxTmp.setHex(s.horizon), k);
       this._wxFog.lerp(_wxTmp.setHex(s.fog), k);
-      u.uZenithColor.value.copy(this._wxZen);
-      u.uHorizonColor.value.copy(this._wxHor);
-      this.fogColor.copy(this._wxFog);
+
+      // MODULATE the sun-driven sky; do not replace it.
+      //
+      // These three colours used to be copied straight over the uniforms every
+      // frame. The weather regimes carry fixed daytime colours, so whatever
+      // setSunAngle had computed from the sun's elevation was overwritten one
+      // frame later and the game had no night: an art review swept the sun from
+      // +75 degrees to six degrees BELOW the horizon and measured the sky
+      // changing by six percent.
+      //
+      // Weather says how grey and flat the sky is; the sun says how bright it
+      // is. Overcast at midnight is a dark grey sky, not a daylight one.
+      const day = this.sky.dayFactor ?? 1;
+      const base = this.sky.baseZenith, baseH = this.sky.baseHorizon;
+      if (base && baseH) {
+        // Cloud cover pulls the sky toward the regime colour, scaled by daylight.
+        u.uZenithColor.value.copy(base).lerp(_wxTmp.copy(this._wxZen).multiplyScalar(day), 0.72);
+        u.uHorizonColor.value.copy(baseH).lerp(_wxTmp.copy(this._wxHor).multiplyScalar(day), 0.72);
+        this.fogColor.copy(this._wxFog).multiplyScalar(0.10 + 0.90 * day);
+      } else {
+        u.uZenithColor.value.copy(this._wxZen);
+        u.uHorizonColor.value.copy(this._wxHor);
+      }
       this.ocean.setFogColor(this.fogColor);
       this.ocean.uniforms.uHorizonColor.value.copy(this._wxHor);
       this.ocean.setSeaState(s.seaState);

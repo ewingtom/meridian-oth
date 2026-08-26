@@ -77,6 +77,7 @@ uniform vec3 uShadowColor;
 uniform vec3 uHorizonColor;
 uniform float uVisibility;
 uniform float uOuter;
+uniform float uCloudSteps;   // march step count, uniform across the frame
 uniform vec4 uSquall[4];   // xz centre, z radius, w strength
 varying vec3 vWorldPos;
 varying float vRad;
@@ -129,7 +130,7 @@ void main() {
   // coarse does not read as smooth cloud; it reads as a stipple of hard dots,
   // which is precisely the "ordered-dither halftone" an art review found across
   // every frame in the game. The cure for that is samples, not more dithering.
-  const int STEPS = 16;
+  const int STEPS = 16;   // loop bound; the live count is uCloudSteps
 
   vec3 rd = -viewDir;                       // from the camera outward
   if (abs(rd.y) < 1e-4) discard;
@@ -171,12 +172,20 @@ void main() {
   // over and over. This is what made the fleet-level view fifteen times more
   // expensive than the close one: the deck covered the whole screen and every
   // pixel paid the full eight-step march.
-  float stepSpan = span / float(STEPS);
-  float feature = 3800.0;                   // metres, coarse cloud cell
-  // Never below ten: fewer than that and the per-pixel variance between
-  // neighbouring rays becomes visible as speckle no matter how cheap the field.
-  int NS = int(clamp(16.0 * clamp(feature / max(stepSpan * horiz, 1.0), 0.62, 1.0), 10.0, 16.0));
-  float fNS = float(NS);
+  // The step count is UNIFORM across the frame. It must be.
+  //
+  // It used to be computed per pixel from the ray's own slab crossing, and
+  // truncated to an int — so neighbouring pixels integrated a different NUMBER
+  // of steps and landed on measurably different results. The boundaries where
+  // that count ticked over drew as thin contour lines tracing the cloud, which
+  // is the terracing an art review found in every one of its ninety-three sky
+  // frames. It is not a quantised colour or a quantised field: raising the bake
+  // to half float changed nothing, because the steps were in the integrator.
+  //
+  // A count that varies only per DRAW cannot band, and it also makes the
+  // derivatives inside the loop well defined.
+  int NS = int(uCloudSteps);
+  float fNS = uCloudSteps;
 
   // Mip level for the whole ray, computed HERE — before the loop, while control
   // flow is still uniform and a footprint can be reasoned about at all.
@@ -184,14 +193,32 @@ void main() {
   float fieldLod = log2(max(1.0, footprint / CLOUD_TEXEL_M));
   float detailFade = smoothstep(7000.0, 150.0, footprint);
 
+  // Sun occlusion, sampled at ONE fixed point on the ray, before the loop.
+  //
+  // This used to be evaluated lazily at the first step whose density passed a
+  // threshold. The density field varies smoothly across the screen, but the
+  // INDEX of the step that first crosses a threshold does not — it jumps between
+  // integers — so the lit side of the cloud jumped with it and drew a contour
+  // line at every one of those transitions. Sixteen steps, sixteen nested
+  // contours: the terracing an art review found in all ninety-three sky frames.
+  // Raising the bake to half float did nothing because the steps were never in
+  // the field; they were in where the shading was sampled from.
+  //
+  // Sampling the slab's mid-height on this ray is continuous in the view
+  // direction, so the shading is too.
+  vec2 sunUV = normalize(uSunDirection.xz + vec2(1e-4, 0.0)) * 0.10;
+  vec3 pMid = uCamPos + rd * (t0 + span * 0.5);
+  vec2 uvMidSun = ((pMid.xz - uCamPos.xz) + wind + vec2(575.0, -340.0)) * 0.00026;
+  float sunOccLod = max(0.0, fieldLod - 0.5);
+  float sunOcc = cf_shapeLod(uvMidSun + sunUV * 1.2, uCloudCoverage, sunOccLod) * 1.6
+               + cf_shapeLod(uvMidSun + sunUV * 3.4, uCloudCoverage, sunOccLod) * 1.4;
+
   float trans = 1.0;                        // transmittance along the ray
   vec3 scatter = vec3(0.0);                 // accumulated in-scattered light
   float squallHit = 0.0;
-  float sunOcc = -1.0;                      // lazily computed at the first hit
   float firstHitH = -1.0;
   vec2 uvMid = uv0;
 
-  vec2 sunUV = normalize(uSunDirection.xz + vec2(1e-4, 0.0)) * 0.10;
 
   // Steps grow with distance, and the field is BLURRED to match the step.
   //
@@ -290,10 +317,6 @@ void main() {
     // between the base of the ray and its top; computing it at the first hit and
     // carrying it down the ray is visually the same lit-side/shadow-side result
     // for a fraction of the work.
-    if (sunOcc < 0.0) {
-      sunOcc = cf_shape(uvi + sunUV * 1.2, uCloudCoverage) * 1.6
-             + cf_shape(uvi + sunUV * 3.4, uCloudCoverage) * 1.4;
-    }
     float sunT = exp(-sunOcc * 1.6);
     // Powder / dark-edge: thin cloud scatters more light back than thick cloud.
     float powder = 1.0 - exp(-d * 4.0);
@@ -373,6 +396,7 @@ export class CloudLayer {
         uSunColor: sharedUniforms.uSunColor,
         uCloudCoverage: sharedUniforms.uCloudCoverage,
         uCloudField: sharedUniforms.uCloudField,
+        uCloudSteps: { value: 16.0 },
         uCloudiness: sharedUniforms.uCloudiness,
         uHorizonColor: sharedUniforms.uHorizonColor,
         uVisibility: sharedUniforms.uVisibility,

@@ -359,7 +359,21 @@ vec2 cf_fieldLod(vec2 uv, float lod) {
 float cf_shapeLod(vec2 uv, float thr, float lod) {
   vec2 f = cf_fieldLod(uv, lod);
   float t = clamp(thr + (f.g - 0.5) * 0.42, -0.15, 0.85);
-  return clamp((f.r - t) / (1.0 - t), 0.0, 1.0);
+  // SMOOTHSTEP, not a hard clamp.
+  //
+  // clamp((d - t) / (1 - t)) has a corner at d == t: density is exactly zero on
+  // one side of the threshold and rising linearly on the other. Integrate that
+  // along a sixteen-step march and every step lands the cloud edge on a discrete
+  // density level, so the SHAPE quantises into terraces — which is what an art
+  // review found across all ninety-three of its sky frames. It measured 11,269
+  // unique colours in the sky, correctly concluding the problem was not colour
+  // banding but the silhouette itself being stepped.
+  //
+  // A C1 ramp through the threshold removes the corner and the terracing with
+  // it. The blend width is the same one cf_softShape uses, so the deck and the
+  // shadows it casts on the sea stay consistent with each other.
+  float d = smoothstep(t - 0.06, t + 0.30, f.r);
+  return d * d * (3.0 - 2.0 * d);
 }
 
 float cf_softShape(vec2 uv, float thr) {

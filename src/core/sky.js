@@ -117,12 +117,20 @@ export class SkySystem {
     // Warmth falls off fast once the sun is properly up; the old /45 ramp left a
     // 25-degree morning sun still two-thirds sunset-orange, which washed the
     // whole sea brown.
+    // How much daylight there is at all. Zero once the sun is six degrees under
+    // (civil twilight ends), one by the time it is eight up. Everything that
+    // should stop happening at night hangs off this.
+    this.dayFactor = THREE.MathUtils.smoothstep(elevationDeg, -6, 8);
     const t = THREE.MathUtils.clamp(elevationDeg / 26, 0, 1);
     // Total irradiance on a PBR surface is sun + hemisphere + environment. With
     // properly baked albedos arriving on the hulls the old 4.6 blew the
     // highlights off them; 2.6 against a 0.55 hemisphere and a 1.05 environment
     // lands a mid-grey topside where it should be.
-    this.sunLight.intensity = THREE.MathUtils.lerp(1.5, 2.6, t);
+    // A sun below the horizon must not light the scene. The old ramp bottomed out
+    // at 1.5 — full daylight — for every elevation at or below zero, which is
+    // why forcing the sun to minus six degrees changed the sky by six percent
+    // and the game had no night at all.
+    this.sunLight.intensity = THREE.MathUtils.lerp(1.5, 2.6, t) * this.dayFactor;
     const warm = new THREE.Color(0xff9d52);
     const white = new THREE.Color(0xfff4e2);
     this.sunLight.color.copy(warm).lerp(white, t);
@@ -136,6 +144,24 @@ export class SkySystem {
     u.uZenithColor.value.copy(zenithLow).lerp(zenithHigh, t);
     u.uHorizonColor.value.copy(horizonLow).lerp(horizonHigh, t);
     u.uSunColor.value.copy(warm).lerp(white, t);
+
+    // Night. Not black — a clear night sky over open ocean is a deep blue with a
+    // slightly lighter band at the horizon, and the eye adapts to it.
+    const nightZenith = new THREE.Color(0x02040c);
+    const nightHorizon = new THREE.Color(0x0a1526);
+    u.uZenithColor.value.lerp(nightZenith, 1 - this.dayFactor);
+    u.uHorizonColor.value.lerp(nightHorizon, 1 - this.dayFactor);
+
+    // Keep the sun-driven values so the weather system can MODULATE them rather
+    // than overwrite them — it used to copy fixed daytime colours over the top of
+    // these every frame, which is what removed the day/night cycle.
+    this.baseZenith = u.uZenithColor.value.clone();
+    this.baseHorizon = u.uHorizonColor.value.clone();
+
+    // Sky fill and image-based lighting follow the sun down too, or hulls stay
+    // fully lit under a night sky.
+    this.hemiLight.intensity = THREE.MathUtils.lerp(0.05, 0.62, this.dayFactor);
+    this.scene.environmentIntensity = THREE.MathUtils.lerp(0.06, 1.05, this.dayFactor);
   }
 
   updateEnvMap() {

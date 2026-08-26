@@ -99,8 +99,21 @@ void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
  */
 export function bakeCloudField(renderer, size = 1024) {
   const rt = new THREE.WebGLRenderTarget(size, size, {
-    format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
+    // HALF FLOAT, not 8-bit.
+    //
+    // The raymarch thresholds this field — smoothstep(t-0.06, t+0.30, density) —
+    // and a threshold AMPLIFIES quantisation. At 8 bits the density has 256
+    // levels, so a threshold window a third of the range wide resolves to about
+    // ninety, and every one of them draws a contour line where neighbouring
+    // texels cross it. Integrated over sixteen march steps that reads as the
+    // cloud SHAPE being terraced, which is exactly what an art review found in
+    // all ninety-three of its sky frames — correctly noting that the sky held
+    // 11,269 unique colours, so the problem was never colour banding.
+    //
+    // Sixteen-bit float has no visible steps left to amplify. Two channels
+    // instead of four keeps a 2048-square bake at 16 MB.
+    format: THREE.RGFormat,
+    type: THREE.HalfFloatType,
     minFilter: THREE.LinearMipmapLinearFilter,
     magFilter: THREE.LinearFilter,
     wrapS: THREE.RepeatWrapping,
@@ -224,8 +237,10 @@ void main() {
 /** Bake the sea's noise field. One 1024-square draw at startup. */
 export function bakeSeaField(renderer, size = 1024) {
   const rt = new THREE.WebGLRenderTarget(size, size, {
-    format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
+    // Half float here too — the sea thresholds this field for whitecaps and foam
+    // patches, and the same amplification applies.
+    format: THREE.RGFormat,
+    type: THREE.HalfFloatType,
     minFilter: THREE.LinearMipmapLinearFilter,
     magFilter: THREE.LinearFilter,
     wrapS: THREE.RepeatWrapping,

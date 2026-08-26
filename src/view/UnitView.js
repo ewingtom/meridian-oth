@@ -238,6 +238,39 @@ function _tempVertexAO(m) {
   m.needsUpdate = true;
 }
 
+/*
+ * Bring baked warship paint to the values paint actually has.
+ *
+ * Measured off the destroyer's own 4096-square albedo atlas: the mean luminance
+ * of its non-empty texels is sRGB 83. US Navy haze grey 5-H sits around sRGB
+ * 125-135, so the bake is about 2.6x too dark once decoded to linear. The packed
+ * metallicRoughness map carries 0.23 in its metalness channel, and painted steel
+ * is a dielectric — 0.02 to 0.04 — so roughly a quarter of the surface response
+ * was being taken away from diffuse and handed to a specular lobe that, at this
+ * roughness, returns almost nothing.
+ *
+ * Those two compounded with the over-strong baked occlusion to produce hulls
+ * that an art review measured at RGB 24 against RGB 219 for the same geometry
+ * with the albedo removed — ships rendering as near-black slabs in daylight.
+ *
+ * Both corrections are applied at the correct lever. glTF's metalness factor
+ * multiplies the map, so scaling the factor rescales the whole channel; the base
+ * colour factor multiplies the decoded albedo. The gain clips only texels above
+ * about sRGB 160, which is 2.2% of the atlas and is deck markings that should be
+ * white anyway.
+ *
+ * This compensates for the bake rather than fixing it. The real fix is to export
+ * the albedo at the right level and the metalness near zero, at which point the
+ * gain here should come back to 1.0.
+ */
+const PAINT_ALBEDO_GAIN = 2.4;
+const PAINT_MAX_METALNESS = 0.12;
+function _calibratePaint(c, name) {
+  if (!/hull|super|deck|paint|grey|gray|haze|boot|keel|nonskid|mast|funnel|house/.test(name)) return;
+  c.metalness = Math.min(c.metalness ?? 1, PAINT_MAX_METALNESS);
+  c.color.multiplyScalar(PAINT_ALBEDO_GAIN);
+}
+
 export class UnitView {
   constructor(scene, unit, opts = {}) {
     this.scene = scene;
@@ -585,6 +618,7 @@ export class UnitView {
             // the renderer was told not to look at it.
             c.vertexColors = true;
             _tempVertexAO(c);
+            _calibratePaint(c, n);
             if (!u.neutral && /hull|super|deck|paint/.test(n)) c.color.lerp(tint, u.side === SIDE.RED ? 0.26 : 0.14);
             c._baked = true;
             seen.set(key, c);
