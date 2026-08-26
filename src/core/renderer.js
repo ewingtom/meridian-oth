@@ -68,6 +68,28 @@ const VIGNETTE_GRADE_SHADER = {
     }
     void main() {
       vec3 c = texture2D(tDiffuse, vUv).rgb;
+
+      // BRING HDR INTO RANGE BEFORE GRADING. This is not a nicety.
+      //
+      // The buffer this reads is half-float and genuinely carries values above
+      // one: the sky is toneMapped:false and writes the sun disc at thirty-four
+      // times white so that bloom, which runs before this pass, has something to
+      // bloom. The S-curve below is the smoothstep polynomial, and smoothstep is
+      // only monotonic on [0,1]. At c = 34 it evaluates to -75,140.
+      //
+      // So the brightest thing in the frame came out of this pass as a large
+      // negative number and clamped to black — the sun rendered as a dark hole
+      // in the middle of its own glare, red channel first because the sun colour
+      // is warm. An art review reported it as "there is no sun", across sixty-
+      // nine frames and every sun elevation tested.
+      //
+      // Everything downstream of bloom is display-referred, so range-limiting
+      // here is correct as well as necessary. Roll off rather than hard-clip, so
+      // the disc keeps a bright core with a gradient into the glare instead of a
+      // flat white plate with a hard edge.
+      c = c / (1.0 + max(vec3(0.0), c - 1.0));
+      c = clamp(c, 0.0, 1.0);
+
       vec3 sCurve = c * c * (3.0 - 2.0 * c);
       c = mix(c, sCurve, 0.12);
       c = (c - 0.5) * uContrast + 0.5;
