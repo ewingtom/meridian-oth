@@ -241,6 +241,46 @@ class Game {
       }
     });
 
+    // Double-click the plot to go there.
+    //
+    // The roster and the contact panel have always done this — double a row and
+    // the camera follows that ship or jumps to that track. But the plot IS the
+    // primary display, and the symbol on it is the same object as the row: if
+    // one responds to a double-click and the other ignores it, the interface is
+    // teaching two different rules for the same act.
+    c.addEventListener('dblclick', (e) => {
+      if (this.cam.mode === CAM.BRIDGE) return;
+      if (this.pendingOrder) return;          // mid-order; the click means a waypoint
+      e.preventDefault();
+      const hit = this.overlay.pick(e.clientX, e.clientY);
+
+      // A unit we own: chase it, exactly as the roster does.
+      if (hit?.unit && hit.unit.alive) {
+        this.selectUnit(hit.unit, false);
+        this.cam.follow(hit.unit);
+        this.audio.ui('confirm');
+        return;
+      }
+      // A contact: close on its position, exactly as the contact panel does.
+      if (hit?.track) {
+        this.selectTrack(hit.track);
+        this.cam.jumpTo(hit.track.x, hit.track.z, 26000);
+        this.audio.ui('confirm');
+        return;
+      }
+      // Empty water: step the camera in toward that point rather than doing
+      // nothing. Every map in every strategy game does this, and a plot that
+      // ignores a double-click on open sea feels broken even when it isn't.
+      const sea = this.cam.screenToSea(
+        (e.clientX / window.innerWidth) * 2 - 1,
+        -(e.clientY / window.innerHeight) * 2 + 1,
+      );
+      if (sea) {
+        this.cam.jumpTo(sea.x, sea.z, Math.max(900, this.cam.distTarget * 0.42));
+        this.audio.ui('click');
+      }
+    });
+
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.cam.zoom(e.deltaY);
@@ -696,7 +736,8 @@ class Game {
       </div>
       <h3 style="margin-top:20px">COMMAND</h3>
       <div class="legend">
-        <div><b>Click</b> select unit or contact</div><div><b>Drag box</b> select several</div>
+        <div><b>Click</b> select unit or contact</div><div><b>Double-click</b> go to it — on the plot or in a panel</div>
+        <div><b>Drag box</b> select several</div><div><b>Double-click sea</b> zoom in there</div>
         <div><b>Right-click sea</b> steer there</div><div><b>Shift + click</b> queue waypoints</div>
         <div><b>1 2 3 4</b> EMCON alpha → delta</div><div><b>E</b> engage designated track</div>
         <div><b>G</b> set course mode</div><div><b>Space</b> pause · number keys on the bar for time</div>

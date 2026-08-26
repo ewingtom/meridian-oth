@@ -198,6 +198,46 @@ const SIDE_TINT = {
  * the detail bubble and disposed when it leaves, so the renderer never carries
  * more than a few dozen hulls even though the sim is tracking a hundred contacts.
  */
+/**
+ * Apply the baked vertex AO at a SANE STRENGTH.
+ *
+ * three.js multiplies COLOR_0 straight into the albedo, and the bake in these
+ * assets is far heavier than ambient occlusion has any business being: measured
+ * on the destroyer's hull mesh it averages 0.44 and never rises above 0.30 over
+ * most of the plating. That is not "darken the recesses", it is "darken the
+ * ship" — and multiplied into an already dark baked albedo it took the hull to
+ * roughly a fiftieth of the reflectance of haze grey paint. An art review read
+ * the result, correctly, as ships rendering as black slabs in full daylight.
+ *
+ * AO is an ambient-visibility term: it belongs in the range 0.75-1.0 across open
+ * surfaces, reaching down only inside genuine cavities. Remapping toward white
+ * keeps the shape information the bake carries — which is real, and worth having
+ * — while returning the hull to a believable brightness.
+ */
+const AO_STRENGTH = 0.42;
+function _tempVertexAO(m) {
+  if (!m || m._aoTempered) return;
+  m._aoTempered = true;
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev?.call(m, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+       #ifdef USE_COLOR
+         // Lift the baked occlusion toward white; see AO_STRENGTH.
+         // vColor is a vec4 whenever COLOR_0 ships with alpha, which these
+         // assets do — so take .rgb explicitly rather than letting the type
+         // depend on how the exporter happened to write the attribute.
+         vec3 ao_ = vColor.rgb;
+         diffuseColor.rgb /= max(vec3(0.02), ao_);
+         diffuseColor.rgb *= mix(vec3(1.0), ao_, ${AO_STRENGTH.toFixed(2)});
+       #endif`,
+    );
+  };
+  m.needsUpdate = true;
+}
+
 export class UnitView {
   constructor(scene, unit, opts = {}) {
     this.scene = scene;
@@ -544,6 +584,7 @@ export class UnitView {
             // ambient" — the occlusion was in the geometry the whole time and
             // the renderer was told not to look at it.
             c.vertexColors = true;
+            _tempVertexAO(c);
             if (!u.neutral && /hull|super|deck|paint/.test(n)) c.color.lerp(tint, u.side === SIDE.RED ? 0.26 : 0.14);
             c._baked = true;
             seen.set(key, c);
@@ -646,6 +687,7 @@ export class UnitView {
       const isHull = /hull|deck|super|boot|keel|paint|grey|haze|skin|house|bridge|funnel|tier/.test(n);
       m._surfaced = true;
       if (m.map && !m.vertexColors) m.vertexColors = true;
+      _tempVertexAO(m);
       // On a properly textured asset the plating, rust and non-skid are already
       // in the map. Generating them again on top produces a double image. Keep
       // only the wet band, which is dynamic and cannot be baked.
