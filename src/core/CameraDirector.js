@@ -260,18 +260,50 @@ export class CameraDirector {
   pan(dx, dy) {
     if (this.mode === CAM.BRIDGE) return;
     if (this.mode === CAM.FOLLOW) { this.mode = CAM.TACTICAL; this.followUnit = null; }
+    /*
+     * The chart follows the pointer.
+     *
+     * This moved the world AGAINST the drag: pulling the mouse left sent the
+     * plot right, which is the sense a key has — a key moves the CAMERA, and
+     * moving the camera left shows you what was on the left, so the world slides
+     * right. A drag is not a key. Every map application in existence treats a
+     * drag as picking the paper up and moving it, so the thing under the cursor
+     * stays under the cursor.
+     *
+     * Measured before this change: a rightward drag of 120 px moved a ship from
+     * NDC 0.000 to -0.418 — the content ran away from the hand pulling it.
+     *
+     * Only the HORIZONTAL was wrong. Vertical already tracked the pointer, and
+     * flipping it too sent a downward drag upward — worth stating, because the
+     * two axes do not have the same sign here and the symmetry is misleading.
+     *
+     * The rotation into world space also had the wrong handedness. It was
+     * rotating the screen vector by +yaw where the camera's screen-right is at
+     * -yaw, which is invisible at yaw 0 and yaw pi — sin is zero at both — and
+     * exactly inverted at the quarter turns. Measured across four yaws, a drag
+     * tracked the pointer at 0 and 3.1 and ran backwards at 1.6 and 4.7, on both
+     * axes. That is why this felt inconsistent rather than simply reversed: it
+     * depended on which way the plot happened to be facing.
+     *
+     * The arrow keys keep the opposite sign and go through panBy, because there
+     * the camera-moving sense is the correct one — but panBy shares this
+     * rotation and had the same handedness bug.
+     */
     const scale = this.dist * 0.0016;
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
-    const ex = -dx * scale, ez = dy * scale;
-    this.focusTarget.x += ex * c - ez * s;
-    this.focusTarget.y += ex * s + ez * c;
+    const ex = dx * scale, ez = dy * scale;
+    this.focusTarget.x += ex * c + ez * s;
+    this.focusTarget.y += -ex * s + ez * c;
   }
 
   panBy(vx, vz) {
     if (this.mode === CAM.FOLLOW) { this.mode = CAM.TACTICAL; this.followUnit = null; }
+    // Same handedness fix as pan(): the camera's screen-right is at -yaw, so the
+    // arrow keys walked the view backwards whenever the plot was turned a
+    // quarter turn from north.
     const c = Math.cos(this.yaw), s = Math.sin(this.yaw);
-    this.focusTarget.x += vx * c - vz * s;
-    this.focusTarget.y += vx * s + vz * c;
+    this.focusTarget.x += vx * c + vz * s;
+    this.focusTarget.y += -vx * s + vz * c;
   }
 
   jumpTo(x, z, dist) {
