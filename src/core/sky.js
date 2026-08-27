@@ -101,6 +101,25 @@ export class SkySystem {
     this._lastEnvRefresh = -999;
     this._overcast = 0;
     this._rainFall = 0;
+    // Key/fill balance.
+    //
+    // With the paint albedo corrected (see PAINT_ALBEDO_GAIN in UnitView) the
+    // fill was carrying the image on its own: a destroyer's sunlit flank measured
+    // p50 102.9 against its shadow side at 66.2, a ratio of 1.56 where a hull
+    // under a clear sky should be near 2.8. Everything was lit and nothing was
+    // shaped. Cutting the two diffuse terms to 0.46 and lifting the sun to 1.35 lands,
+    // on a hull pinned beam-on to the sun so the lit area is identical every run,
+    // p50 150 lit / 49 shadowed, ratio 3.07, one tenth of one percent clipped.
+    //
+    // Pin the heading before believing any of these numbers. Measuring a ship
+    // free to manoeuvre returned 115, 144 and 123 for identical settings, because
+    // its aspect to the sun differed each run — a spread wider than most of the
+    // changes being measured.
+    //
+    // A useful side effect: red-minus-blue on the lit side went from -42 to -15.
+    // Most of the blue cast on the hulls was simply too much sky fill.
+    this.keyScale = 1.35;
+    this.fillScale = 0.46;
     this._followTarget = new THREE.Vector3();
     this.setSunAngle(this._elevation, this._azimuth);
     this.updateEnvMap();
@@ -212,9 +231,9 @@ export class SkySystem {
     // Published for the ocean shader, which is hand-lit and cannot read the
     // three.js light rig. Weather only — night is handled by the palette.
     this.weatherLight = diffuse;
-    this.sunLight.intensity = (this._sunBase ?? 1) * beam;
-    this.hemiLight.intensity = (this._hemiBase ?? 0.5) * diffuse;
-    this.scene.environmentIntensity = (this._envBase ?? 1) * diffuse;
+    this.sunLight.intensity = (this._sunBase ?? 1) * beam * this.keyScale;
+    this.hemiLight.intensity = (this._hemiBase ?? 0.5) * diffuse * this.fillScale;
+    this.scene.environmentIntensity = (this._envBase ?? 1) * diffuse * this.fillScale;
     // The sky shader uses uSunColor for the sun's glow AND for the light on the
     // cloud deck. With no direct beam there is no bright disc and no lit cloud
     // top, so this has to follow the beam down or a storm keeps a hot spot in it.

@@ -258,7 +258,21 @@ function _tempVertexAO(m) {
  * painted steel is a dielectric and the bakes carry values an order of magnitude
  * too high for paint.
  */
-const PAINT_ALBEDO_GAIN = 1.0;
+// The baked topside atlas is too dark for the paint it represents.
+//
+// Measured through an offscreen target with the composer out of the loop and the
+// probe calibrated first (K = 0.05/0.252/0.50/1.00 must return K x 255): the map
+// sample decodes to linear 0.151, the glTF colour factor is 0.886, so lighting
+// consumes an albedo of 0.134. US Navy haze grey 5-H is 0.252. The paint is 1.88x
+// too dark, and the scene compensated with an ambient fill roughly three times
+// too strong — which is why a hull's lit side and its shadow side measured within
+// three luminance values of each other. There was no key light shaping at all.
+//
+// Properly the atlas should be re-baked; lifting the factor is the fix that does
+// not require re-exporting every asset. It puts a factor above 1, which is not a
+// legal glTF authoring value, but it is compensating for a texture that is wrong,
+// and the product is what lighting actually sees: 0.134 x 1.88 = 0.252.
+const PAINT_ALBEDO_GAIN = 1.88;
 const PAINT_MAX_METALNESS = 0.12;
 // Fittings, davits, masts and deck machinery. Oxidised or painted steel, not a
 // mirror: an art review found this material at 13,240 triangles — the second
