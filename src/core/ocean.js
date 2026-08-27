@@ -476,6 +476,20 @@ float opticalDepth(float dist, float hA, float hB, float k) {
 uniform float uGradeExposure;
 vec3 acesInverse(vec3 y) {
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  // Overexposure has to run to white, not through the nearest primary.
+  //
+  // The clamp below is per channel, so a colour whose red passes one first is
+  // held there while green and blue keep climbing. The sun's glow is a single
+  // warm hue scaled over four orders of magnitude, and that clamp turned it into
+  // a ringed target: a pink halo where only red had clipped, a yellow ring where
+  // red and green had, a white core where all three had. Nothing in the scene is
+  // pink. Pull the channel ratios together as the peak goes past one so they
+  // arrive at the ceiling together, which is also what film does.
+  float peak = max(max(y.r, y.g), y.b);
+  if (peak > 1.0) {
+    float s = 1.0 / (1.0 + (peak - 1.0) * 1.2);
+    y = mix(vec3(1.0), y / peak, s) * peak;
+  }
   y = clamp(y, 0.0, 0.9999);
   vec3 A = y * c - a;
   vec3 B = y * d - b;
@@ -1341,6 +1355,20 @@ float opticalDepth(float dist, float hA, float hB, float k) {
 uniform float uGradeExposure;
 vec3 acesInverse(vec3 y) {
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  // Overexposure has to run to white, not through the nearest primary.
+  //
+  // The clamp below is per channel, so a colour whose red passes one first is
+  // held there while green and blue keep climbing. The sun's glow is a single
+  // warm hue scaled over four orders of magnitude, and that clamp turned it into
+  // a ringed target: a pink halo where only red had clipped, a yellow ring where
+  // red and green had, a white core where all three had. Nothing in the scene is
+  // pink. Pull the channel ratios together as the peak goes past one so they
+  // arrive at the ceiling together, which is also what film does.
+  float peak = max(max(y.r, y.g), y.b);
+  if (peak > 1.0) {
+    float s = 1.0 / (1.0 + (peak - 1.0) * 1.2);
+    y = mix(vec3(1.0), y / peak, s) * peak;
+  }
   y = clamp(y, 0.0, 0.9999);
   vec3 A = y * c - a;
   vec3 B = y * d - b;

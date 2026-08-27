@@ -84,6 +84,30 @@ const VIGNETTE_GRADE_SHADER = {
       const float a = 2.51, b = 0.03, c2 = 2.43, d = 0.59, e = 0.14;
       return clamp((x * (a * x + b)) / (x * (c2 * x + d) + e), 0.0, 1.0);
     }
+    /*
+     * Bright colours have to lose their saturation on the way to white.
+     *
+     * The Narkowicz fit is applied per channel, so each one saturates on its own
+     * schedule. Where a warm highlight sits on a blue sky the red channel reaches
+     * one first and the clamp holds it there while green and blue keep climbing —
+     * so the sum reads pink, then yellow-green further in as green catches up.
+     * A dawn frame showed exactly that around the sun: a white core inside a
+     * yellow-green ring inside a magenta halo. Nothing in the scene is magenta.
+     *
+     * The full ACES RRT carries a glow module and a highlight desaturation that
+     * do this properly; the fit drops both. Approximate it by pulling the channel
+     * ratios toward equal as the peak channel goes past one, which is also how
+     * film behaves: an overexposed highlight of any hue ends up white.
+     */
+    vec3 desaturateHighlights(vec3 c) {
+      float peak = max(max(c.r, c.g), c.b);
+      if (peak <= 1.0) return c;
+      vec3 ratio = c / peak;
+      // Full saturation at the knee, falling as the peak climbs above it. The
+      // 0.55 puts a three-stop overexposure at roughly a quarter saturation.
+      float s = 1.0 / (1.0 + (peak - 1.0) * 0.55);
+      return mix(vec3(1.0), ratio, s) * peak;
+    }
     vec3 linearToSRGB(vec3 c) {
       return mix(c * 12.92,
                  1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055,
@@ -127,7 +151,8 @@ const VIGNETTE_GRADE_SHADER = {
       // the hand-rolled rolloff used to (the sky writes the sun disc at thirty-
       // four times white so bloom has something to work with), and it does it
       // with a shoulder rather than a hard knee.
-      c = acesFilmic(c * uExposure);
+      c = desaturateHighlights(c * uExposure);
+      c = acesFilmic(c);
       c = linearToSRGB(c);
       c = clamp(c, 0.0, 1.0);
 
