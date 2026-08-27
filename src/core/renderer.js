@@ -382,7 +382,14 @@ export class RenderPipeline {
       low: 0.8,
       medium: 1,
       high: Math.min(1.15, dpr),
-      exquisite: Math.min(1.5, dpr),
+      // Not 1.5. Exquisite also turns on 2x MSAA, renders the sky at full
+      // resolution instead of half, and grows the shadow map — and 1.5x
+      // supersampling on top of MSAA is paying twice for the same edges. Stacked,
+      // the cost pushed the dynamic controller into cutting resolution so hard
+      // that the top tier rendered 1.13 MP against high's 1.22: strictly fewer
+      // pixels, at 49 fps instead of 61. Spend the budget on the effects that
+      // high does not have and leave a little headroom so the controller holds.
+      exquisite: Math.min(1.25, dpr),
     };
     this._basePr = caps[q] ?? caps.medium;
     this._dynScale = 1;
@@ -613,15 +620,36 @@ export class RenderPipeline {
     this._frameEma += (dt - this._frameEma) * 0.14;
     if (now < this._dynCooldown) return;
 
-    const TARGET = 16.7, SLACK = 1.6;
+    /*
+     * A vsync-capped frame time is not a load signal.
+     *
+     * The thresholds were TARGET + 1.6 to step down and TARGET - 3.5 to climb
+     * back. With vsync on a 60 Hz panel every frame that makes its budget
+     * measures 16.7 ms no matter how much headroom is left underneath, so the
+     * climb condition of 13.2 ms could never once be true, while any single
+     * hitch past 18.3 stepped the scale down for good. The controller was a
+     * ratchet: it could only ever lose resolution.
+     *
+     * It had done exactly that. Measured at 1280x720, exquisite was rendering
+     * 1190x669 while high rendered 1472x827 — the top tier had ground itself
+     * down to below the tier beneath it, and could not climb back out.
+     *
+     * With vsync, frame times quantise: about 16.7 when the budget is made and
+     * about 33.3 when it is missed. So the decision threshold belongs between
+     * those two, not a millimetre above the first one. Step down only on a real
+     * miss, and let it climb whenever the frame is still landing on the refresh.
+     */
+    const TARGET = 16.7;
+    const DROP_AT = TARGET * 1.26;              // 21.0 — genuinely missing vsync
+    const CLIMB_UNDER = TARGET * 1.10;          // 18.4 — still landing on it
     let next = this._dynScale;
     // Step down in proportion to how far over budget the frame is — one notch at
     // a time takes several cooldowns to climb out of a bad hole.
-    if (this._frameEma > TARGET + SLACK) {
+    if (this._frameEma > DROP_AT) {
       const over = this._frameEma / TARGET;
       next = Math.max(this._dynMin, this._dynScale - (over > 1.6 ? 0.18 : over > 1.25 ? 0.12 : 0.07));
     }
-    else if (this._frameEma < TARGET - 3.5) next = Math.min(1, this._dynScale + 0.05);
+    else if (this._frameEma < CLIMB_UNDER) next = Math.min(1, this._dynScale + 0.05);
     if (Math.abs(next - this._dynScale) < 0.001) return;
     this._dynScale = next;
     this._dynCooldown = now + 450;

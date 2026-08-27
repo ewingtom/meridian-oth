@@ -517,6 +517,10 @@ export class SceneView {
       // Take light out of the scene under cloud, not just colour off the sky.
       this.sky.setOvercast(s.coverage, s.rain);
       this.ocean.uniforms.uLightScale.value = this.sky.weatherLight ?? 1;
+      // Cirrus thins out as a deck closes over it — you cannot see high cloud
+      // through stratus. This uniform used to be pinned at 0.95 for ever.
+      u.uCirrus.value += ((0.34 * (1 - THREE.MathUtils.smoothstep(s.coverage, 0.42, 0.88)))
+        - u.uCirrus.value) * k;
       // The deck has to go out with the sun; it is lit, not self-luminous.
       this.clouds?.setDaylight(this.sky.dayFactor ?? 1,
         this.sky.sky.material.uniforms.uHorizonColor.value);

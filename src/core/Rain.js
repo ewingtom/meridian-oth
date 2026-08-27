@@ -82,12 +82,33 @@ void main() {
   // metres at this drop's depth and build the quad from that.
   float mPerPx = 2.0 * dist / (projectionMatrix[1][1] * uViewport.y);
   float near   = smoothstep(26.0, 2.5, dist);
-  float len   = mPerPx * mix(13.0, 44.0, near) * iScale * (0.6 + amt * 0.7);
-  float width = mPerPx * mix(1.15, 2.3, near) * (0.75 + iScale * 0.4);
+  float len   = mPerPx * mix(11.0, 26.0, near) * iScale * (0.6 + amt * 0.7);
+  float width = mPerPx * mix(0.9, 1.5, near) * (0.75 + iScale * 0.4);
 
-  vec3 side = normalize(cross(vDir, vec3(0.0, 0.0, 1.0)));
-  vPos += vDir * (position.y * len) + side * (position.x * width);
-  vPos *= cull;                                  // degenerate the culled quads
+  // Any reference axis will do for the quad's width, EXCEPT one parallel to the
+  // streak. Looking straight up or straight down a near-vertical fall lines vDir
+  // up with view forward, the cross product collapses, and normalize returns
+  // garbage that spins the quad.
+  vec3 ref = abs(vDir.z) > 0.95 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+  vec3 side = normalize(cross(vDir, ref));
+
+  /*
+   * Shrink the culled quads. Do not MOVE them.
+   *
+   * This was vPos *= cull — scaling the drop's whole view-space position by
+   * the cull factor. For a fully culled drop that degenerates the quad, which
+   * was the intent. But cull is a smoothstep, so every drop in the fade band at
+   * the edge of the cylinder got its position scaled toward the camera origin
+   * instead: dragged down its own view ray to a fraction of its true depth,
+   * carrying the already-applied quad offsets with it.
+   *
+   * That is what turned a gale into a radial burst of coarse white scratches
+   * centred on the screen, with drops apparently falling closer to the lens than
+   * the ship in the middle distance. Scale the OFFSET, so the quad closes to a
+   * point where the drop actually is.
+   */
+  vec3 offs = vDir * (position.y * len) + side * (position.x * width);
+  vPos += offs * cull;
   vFade = cull * amt * mix(0.30, 1.0, smoothstep(60.0, 5.0, dist));
   vNear = smoothstep(14.0, 2.0, dist);
   gl_Position = projectionMatrix * vec4(vPos, 1.0);

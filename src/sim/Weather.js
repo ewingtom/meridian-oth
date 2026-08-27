@@ -23,6 +23,19 @@ import { clamp, NM } from './constants.js';
 const MIN = 60;
 
 /** Named regimes the front system walks between. Each is a target, not a state. */
+// Storm domes are brighter at the ZENITH, not the horizon.
+//
+// CIE S 011 / ISO 15469 gives the standard overcast sky as
+//   L(theta) = L_zenith * (1 + 2 sin theta) / 3
+// so the zenith is three times the horizon: looking straight up you are seeing
+// through the least cloud. These regimes had it the other way round — an
+// overcast zenith of 0x3b4854 under a horizon of 0x78858f, measured at an
+// up-over-horizon ratio of 0.82 where the standard wants 2.07. I made that worse
+// while fixing the overall level, by darkening the zeniths.
+//
+// The pairs below sit at a linear zenith/horizon ratio near 3. Haze still
+// brightens the last few degrees above the sea; that comes from the aerial
+// perspective in the ocean and sky shaders, not from the dome colours.
 const REGIMES = [
   {
     id: 'CLEAR', name: 'CLEAR — EXCELLENT VISIBILITY',
@@ -42,12 +55,12 @@ const REGIMES = [
   {
     id: 'OVERCAST', name: 'OVERCAST — REDUCED VISIBILITY',
     seaState: 4.5, coverage: 0.86, visNm: 7, rain: 0.18,
-    zenith: 0x3b4854, horizon: 0x78858f, fog: 0x7a8792, weight: 1.0,
+    zenith: 0x9aa6b1, horizon: 0x5c656d, fog: 0x6b747c, weight: 1.0,
   },
   {
     id: 'GALE', name: 'GALE — HEAVY SEA, SENSORS DEGRADED',
     seaState: 5.6, coverage: 0.95, visNm: 3.5, rain: 0.55,
-    zenith: 0x2e3740, horizon: 0x5c656d, fog: 0x606970, weight: 0.55,
+    zenith: 0x8a95a0, horizon: 0x525a61, fog: 0x5d666d, weight: 0.55,
   },
 ];
 

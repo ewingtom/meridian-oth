@@ -17,6 +17,8 @@ export const SkyShader = {
     uGradeExposure: { value: 1.3 },
     uCloudField: { value: null },
     uCloudiness: { value: 0.95 },
+    // High cirrus, separately from the deck. See the note at the mix below.
+    uCirrus: { value: 0.30 },
     uCloudColorLit: { value: new Color(0xf4f7fb) },
     uCloudColorShadow: { value: new Color(0x394b60) },
     uTime: { value: 0 },
@@ -38,6 +40,7 @@ export const SkyShader = {
     uniform vec3 uSunColor;
     uniform float uCloudCoverage;
     uniform float uCloudiness;
+    uniform float uCirrus;
     uniform vec3 uCloudColorLit;
     uniform vec3 uCloudColorShadow;
     uniform float uTime;
@@ -276,7 +279,24 @@ void main() {
         * (1.0 - smoothstep(220000.0, 520000.0, distCir));
       // Cirrus is ice, so it is bright where it is between you and the sun.
       vec3 cirCol = mix(uCloudColorLit * 1.02, uSunColor * 1.25, pow(sd, 3.0) * 0.7);
-      sky = mix(sky, cirCol, cirrus * 0.34 * uCloudiness);
+      /*
+       * Cirrus is high cloud, and you cannot see it through a stratus deck.
+       *
+       * This term was scaled by uCloudiness, which is initialised to 0.95 and
+       * then never written by anything — setWeatherLook drives uCloudCoverage
+       * and has never touched it. So a near-white veil at 95% strength lay over
+       * the whole dome in every regime, in every weather, at every hour.
+       *
+       * It flattened the sky's colour to nothing: measured by unprojecting rays,
+       * red-over-blue came out 0.526 at two degrees and 0.513 at fifty — no
+       * chromatic gradient at all across the entire dome. With the veil removed
+       * the same measurement gives 0.427 and 0.068, which is a sky. It is also
+       * why FAIR rendered BRIGHTER than CLEAR.
+       *
+       * Now on its own uniform, driven by coverage, and going away as a deck
+       * closes over it.
+       */
+      sky = mix(sky, cirCol, cirrus * 0.34 * uCirrus);
 
       // ── STARS ────────────────────────────────────────────────────────────
       //
