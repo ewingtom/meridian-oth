@@ -675,7 +675,15 @@ export class SceneView {
     const sources = [];
     for (const [u, v] of this.views) {
       if (u.isAir || u.isSub) continue;
-      if (Math.abs(u.speedKts) < 1.5) continue;
+      // A stopped ship still reflects.
+      //
+      // This slot carries two things: the Kelvin wake, which does need way on,
+      // and the reflection the hull lays down the water, which does not. Gating
+      // the whole slot on speed meant a ship lying stopped — hove to, at a RAS,
+      // or dead in the water after damage — sat on a mirror-flat sea casting
+      // nothing at all, which is the single most obvious way to look pasted on.
+      // The wake terms are already scaled by uWakeDim.x, which is speed over 22
+      // knots, so they come out to nothing on their own at rest.
       sources.push({
         u,
         x: cam.rx(u.x), z: cam.rz(u.z), heading: u.heading,
