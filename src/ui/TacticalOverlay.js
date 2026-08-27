@@ -413,8 +413,10 @@ export class TacticalOverlay {
       const q = this.project(fx, gz);
       if (q && q.y > 30 && q.y < this.h - 30) {
         ctx.textAlign = 'left';
-        // World +z runs south, so a positive grid value is southing.
-        const n = -gz / NM;
+        // World +z runs NORTH here, not south. Fixing the longitude labels I
+        // flipped this the wrong way and an art review caught the result: 50S at
+        // the top of the chart and 75N at the bottom.
+        const n = gz / NM;
         ctx.fillText(`${Math.abs(n).toFixed(0)}${n < 0 ? 'S' : 'N'}`, 6, q.y - 3);
       }
     }
