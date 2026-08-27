@@ -29,6 +29,9 @@ function dm(deg, hemis, pad) {
   return `${String(dd).padStart(pad, '0')}\u00b0${String(mm).padStart(2, '0')}'${h}`;
 }
 
+// Tried in order: stay put, then alternate up and down in row-height steps.
+const LABEL_OFFSETS = [0, -15, 15, -30, 30, -45, 45, -60, 60, -76, 76];
+
 function gridLat(gz) {
   return dm(CHART_DATUM.lat + gz / NM / 60, 'NS', 2);
 }
@@ -102,6 +105,8 @@ export class TacticalOverlay {
     this.dragBox = null;
     this.orderPreview = null;
     this.pickables = [];
+    // Rectangles already claimed by a label this frame; see _label.
+    this._labelBoxes = [];
     this.time = 0;
     this.resize();
   }
@@ -140,6 +145,7 @@ export class TacticalOverlay {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
     this.pickables.length = 0;
+    this._labelBoxes.length = 0;
 
     const chart = this.cam.chartness;
     const mpp = this.metresPerPixel;
@@ -972,15 +978,54 @@ export class TacticalOverlay {
     ctx.font = '500 10.5px ui-monospace, Menlo, Consolas, monospace';
     ctx.textAlign = 'left';
     const x = p.x + size + 8;
-    let y = p.y - 4;
-    ctx.fillStyle = 'rgba(6,12,18,0.62)';
     const wmax = Math.max(...lines.map(l => ctx.measureText(l).width));
-    ctx.fillRect(x - 3, y - 10, wmax + 6, lines.length * 12 + 4);
+    const bw = wmax + 6, bh = lines.length * 12 + 4;
+
+    /*
+     * A screen full of overlapping name boxes is not a plot.
+     *
+     * Labels were drawn wherever the symbol happened to be, so a task group in
+     * formation — which is the normal case, since that is what a screen IS —
+     * stacked four of them on the same pixels: USS GRANITE BAY over USNS CAPE
+     * HATTERAS over USS MERIDIAN, none of them readable.
+     *
+     * Nudge each one vertically until it finds clear space, alternating up and
+     * down so the cluster opens symmetrically rather than sliding off one way.
+     * A label that has moved gets a leader back to its own symbol, or you have
+     * solved the collision and created an ambiguity instead.
+     */
+    let dy = 0;
+    for (const off of LABEL_OFFSETS) {
+      if (!this._labelHits(x - 3, p.y - 14 + off, bw, bh)) { dy = off; break; }
+      dy = off;
+    }
+    const y0 = p.y - 4 + dy;
+    this._labelBoxes.push({ x: x - 3, y: y0 - 10, w: bw, h: bh });
+
+    if (Math.abs(dy) > 6) {
+      ctx.strokeStyle = 'rgba(150,180,205,0.42)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(p.x + size + 2, p.y - 4);
+      ctx.lineTo(x - 3, y0 - 4);
+      ctx.stroke();
+    }
+
+    let y = y0;
+    ctx.fillStyle = 'rgba(6,12,18,0.62)';
+    ctx.fillRect(x - 3, y - 10, bw, bh);
     for (let i = 0; i < lines.length; i++) {
       ctx.fillStyle = i === 0 ? col : 'rgba(210,226,238,0.82)';
       ctx.fillText(lines[i], x, y);
       y += 12;
     }
+  }
+
+  _labelHits(x, y, w, h) {
+    for (const b of this._labelBoxes) {
+      if (x < b.x + b.w && x + w > b.x && y < b.y + b.h && y + h > b.y) return true;
+    }
+    return false;
   }
 
   // ── ordnance ──────────────────────────────────────────────────────────────
