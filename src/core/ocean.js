@@ -893,7 +893,14 @@ void main() {
   //
   // Recalibrated to the amplitude range that now exists: nothing breaks on a
   // calm, and a gale is covered in breaking crests.
-  float breakLimit = mix(0.92, 0.30, clamp((uWaveAmp - 0.12) / 1.35, 0.0, 1.0));
+  //
+  // Second calibration pass, against measured coverage rather than by eye. With
+  // the patch term fixed this reached full only at the very top of the scale:
+  // sea state 5 measured 0% whitecap coverage and sea state 8 only 2.3%. A real
+  // Douglas 5 is visibly flecked and a Douglas 8 is a third foam. Reaching the
+  // low limit sooner, and lower, puts breaking crests on a rough sea without
+  // painting the calm — sea state 3 still measures clean.
+  float breakLimit = mix(0.92, 0.18, clamp((uWaveAmp - 0.10) / 0.90, 0.0, 1.0));
   float crest = smoothstep(breakLimit, breakLimit + 0.30, vFoamFactor);
 
   // DETAIL BY DISTANCE.
@@ -911,14 +918,30 @@ void main() {
   // fragment shader cheap rather than catastrophic.
   float capPatch, fizz, streakFoam;
   if (dist < 2600.0) {
-    capPatch = smoothstep(0.46, 0.80, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
-      * smoothstep(0.34, 0.78, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
+    // THRESHOLDS CALIBRATED TO fbm's ACTUAL RANGE.
+    //
+    // fbm() here is three octaves at 0.5 / 0.25 / 0.125, so it sums to at most
+    // 0.875 and averages about 0.44 — it does NOT span zero to one. These three
+    // smoothsteps were written as though it did, reaching for 0.75 and 0.80,
+    // and they are MULTIPLIED together: each one sat near zero and the product
+    // was nothing at all. Measured on a sea state 8 gale, crest was 0.95 and
+    // capPatch was 0.002, so the sea correctly decided it was breaking
+    // everywhere and then multiplied the foam away. Three art reviews running
+    // reported no whitecaps at any sea state, and this is why.
+    //
+    // Centred on 0.44 now, with a spread that leaves the product low on average
+    // and full where all three coincide — which is what breaking looks like:
+    // discrete patches, not a continuous ribbon along every crest.
+    capPatch = smoothstep(0.35, 0.52, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
+      * smoothstep(0.32, 0.50, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
       // A third, very large scale: whole areas of sea that are simply breaking
       // more than the areas next to them.
-      * (0.20 + 0.80 * smoothstep(0.35, 0.75, fbm(vWorldPos.xz * 0.0022 + 91.0)));
+      * (0.40 + 0.60 * smoothstep(0.34, 0.52, fbm(vWorldPos.xz * 0.0022 + 91.0)));
     fizz = 0.45 + 0.55 * smoothstep(0.35, 0.85, noise(vWorldPos.xz * 3.2 - uTime * 0.9));
     // Streaks of dissipated foam lying in the troughs downwind of a break.
-    streakFoam = smoothstep(0.55, 1.0, fbm(vWorldPos.xz * 0.09 + uTime * 0.02))
+    // Same calibration problem: 0.55 to 1.0 is unreachable for a field that tops
+    // out at 0.875 and averages 0.44, so the downwind streaks never drew either.
+    streakFoam = smoothstep(0.44, 0.62, fbm(vWorldPos.xz * 0.09 + uTime * 0.02))
       * smoothstep(breakLimit * 0.72, breakLimit, vFoamFactor) * 0.22;
   } else {
     // Far field: one cheap octave standing in for the whole stack. Averaged over
