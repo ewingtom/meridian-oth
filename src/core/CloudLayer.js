@@ -338,7 +338,22 @@ void main() {
     // from the one below it, so a ray crosses different cloud at different
     // heights, which is also what a real cumulus does under wind shear.
     vec2 shear = vec2(f * 1150.0, f * -680.0);
-    vec2 uvi = ((p.xz - uCamPos.xz) + wind + shear) * 0.00026;
+    /*
+     * Heap clouds are SMALLER than layer clouds.
+     *
+     * One unit of this field is 1/0.00026 = 3846 m, so the base cell is about
+     * four kilometres across. That is a reasonable stratus patch and far too big
+     * for a cumulus, which runs half a kilometre to two. At fair-weather coverage
+     * it produced a handful of enormous soft blobs — cloud that fills rather than
+     * heaps, and a review measured FAIR at LESS local contrast than a clear sky
+     * because there were no edges and no gaps in it, only a wash.
+     *
+     * Tightening the field as the sky becomes more scattered gives more cells,
+     * smaller, with real sky between them. Under a solid deck it relaxes back,
+     * where a broad field is right.
+     */
+    float cellTighten = mix(1.0, 2.6, smoothstep(0.30, 0.62, uCloudCoverage));
+    vec2 uvi = ((p.xz - uCamPos.xz) + wind + shear) * (0.00026 * cellTighten);
     // Two things can undersample the field, and both have to be accounted for:
     // the march step (handled by ds * horiz) and the SCREEN PIXEL itself. Near
     // the horizon one pixel of the deck covers tens of kilometres of cloud, so
@@ -512,6 +527,10 @@ void main() {
 }
 `;
 
+// The base of a heap cloud, for setDaylight to blend toward as the sky becomes
+// more scattered. Thick cloud lit only from above and well into its own shadow.
+const _cumulusBase = new THREE.Color(0x4e5866);
+
 export class CloudLayer {
   constructor(sharedUniforms) {
     this.material = new THREE.ShaderMaterial({
@@ -576,8 +595,27 @@ export class CloudLayer {
     const oc = Math.max(0, Math.min(1, overcast));
     const k = (0.05 + 0.95 * day);
     const n = 1 - day;
+    /*
+     * A heap cloud and a layer cloud need different amounts of CONTRAST, not
+     * just different brightness.
+     *
+     * uShadowColor was chosen for stratus — a bright neutral grey, so an overcast
+     * would not vanish into the zenith behind it. That is right for a sheet and
+     * badly wrong for cumulus, whose bases are dark: a fair-weather sky is the
+     * most contrasty there is, brilliant sunlit tops against dark bases and blue
+     * gaps. With a light base the whole cloud sat inside about ninety levels and
+     * a review measured FAIR at LESS local contrast than a clear sky — p5 to p95
+     * of 62 against 74, where it should be past 100.
+     *
+     * So the base darkens as the sky becomes more scattered, which widens the
+     * range the sun-transmission term has to work across, and closes again under
+     * a solid deck where a uniform grey underside is correct.
+     */
+    const heap = 1 - oc;
     u.uLitColor.value.copy(this._litBase).multiplyScalar(k * (1 - 0.30 * oc));
-    u.uShadowColor.value.copy(this._shadowBase).multiplyScalar(k * (1 - 0.46 * oc));
+    u.uShadowColor.value.copy(this._shadowBase)
+      .lerp(_cumulusBase, heap * 0.72)
+      .multiplyScalar(k * (1 - 0.46 * oc));
     if (nightSky) {
       u.uLitColor.value.lerp(nightSky, n * 0.55);
       u.uShadowColor.value.lerp(nightSky, n * 0.70);
