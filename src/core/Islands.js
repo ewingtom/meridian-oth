@@ -195,6 +195,21 @@ vec3 acesInverse(vec3 y) {
   return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
 }
 
+/* Two-component atmosphere, matching the ocean shader exactly so land and sea
+ * fog identically. Aerosol hugs the surface (1.25 km scale height) and is what
+ * limits visibility at sea level; Rayleigh is weaker but reaches to 8.4 km. */
+float layerDepth(float dist, float lo, float hi, float H) {
+  float dh = hi - lo;
+  if (dh < 1.0) return dist * exp(-lo / H);
+  return dist * (H / dh) * (exp(-lo / H) - exp(-hi / H));
+}
+float opticalDepth(float dist, float hA, float hB, float k) {
+  float lo = max(0.0, min(hA, hB));
+  float hi = max(0.0, max(hA, hB));
+  return k * layerDepth(dist, lo, hi, 1250.0)
+       + 1.15e-5 * layerDepth(dist, lo, hi, 8400.0);
+}
+
 void main() {
   vec3 N = normalize(vNrm);
   float slope = 1.0 - clamp(N.y, 0.0, 1.0);
@@ -234,9 +249,21 @@ void main() {
   vec3 H = normalize(V + uSunDirection);
   lit += uSunColor * pow(max(dot(N, H), 0.0), 40.0) * wet * 0.35;
 
+  // AERIAL PERSPECTIVE THROUGH A REAL ATMOSPHERE, not a uniform slab.
+  //
+  // This used a flat exp(-distance) fog, which does not know how high the camera
+  // is. From the chart view at 38 km the slant range to an island is ~40 km, so
+  // that model saturated at its 0.96 clamp and painted the whole island in
+  // horizon colour: an art review found islands rendering as hard white squares
+  // from 40 km up, which is exactly what a fully-fogged landmass looks like from
+  // above. The sea did not do this because the ocean shader already integrates
+  // a two-component atmosphere — aerosol hugging the surface at a 1.25 km scale
+  // height, Rayleigh reaching to 8.4 km — so looking DOWN through thin air is
+  // correctly nearly clear. Same integration here, so land and sea agree.
   float dist = length(cameraPosition - vWorld);
-  float air = 1.0 - exp(-dist * (3.912 / max(2000.0, uVisibility)) * 0.62);
-  vec3 color = mix(lit, uHorizonColor * 0.97, clamp(air, 0.0, 0.96));
+  float air = 1.0 - exp(-opticalDepth(dist, cameraPosition.y, vWorld.y,
+                                      3.912 / max(2000.0, uVisibility)));
+  vec3 color = mix(lit, uHorizonColor * 0.97, clamp(air, 0.0, 0.94));
   color += (ihash(gl_FragCoord.xy * 0.21 + uTime) - 0.5) * (2.0 / 255.0);
   // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
   // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.

@@ -184,7 +184,12 @@ export class Explosion {
       ? Math.max(0.55, 0.9 * scale)
       : underwater
         ? 2.6 * Math.min(1.6, scale)
-        : Math.min(11, 2.6 * Math.min(1.6, scale) + (scale > 1 ? 5.5 : 0));
+        // A warship hit does not stop smoking after ten seconds. The whole
+        // event was being deleted at 9.7 s — an art review timed it — taking the
+        // column with it while the ship was still burning. Real fires burn for
+        // hours; a minute of standing smoke is the least this should do, and the
+        // column's own opacity curve fades it out long before the timer.
+        : Math.min(75, 2.6 * Math.min(1.6, scale) + (scale > 1 ? 55 : 0));
 
     // Deeper orange (was a yellow-amber that read butter-yellow/cream), and a
     // lower multiplier so the peak stays orange instead of blowing to cream — the

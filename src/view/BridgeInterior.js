@@ -131,12 +131,19 @@ export class BridgeInterior {
     // Instrument glow. A darkened wheelhouse is lit only by its own displays, and
     // that red wash on the deckhead is most of what makes the room feel like a
     // warship's bridge rather than a shed.
-    const glow = new THREE.PointLight(0xff6a3a, 6.5, 9, 2);
-    glow.position.set(0, -0.55, DEPTH * 0.5 - 1.1);
-    this.group.add(glow);
-    const chart = new THREE.PointLight(0x4a86c4, 3.0, 6, 2);
-    chart.position.set(-width * 0.28, -0.3, -0.6);
-    this.group.add(chart);
+    // Instrument glow — and it has to KNOW WHAT TIME IT IS.
+    //
+    // A 6.5-candela orange lamp a metre from the eye is right at night, when a
+    // wheelhouse is darkened and lit only by its own displays. At midday it is a
+    // sunlamp: an art review found it burning under a 58-degree sun and turning
+    // the console salmon. Displays dim in daylight because they have to compete
+    // with the sun; these now do the same, via setDaylight below.
+    this.glow = new THREE.PointLight(0xff6a3a, 6.5, 9, 2);
+    this.glow.position.set(0, -0.55, DEPTH * 0.5 - 1.1);
+    this.group.add(this.glow);
+    this.chartLamp = new THREE.PointLight(0x4a86c4, 3.0, 6, 2);
+    this.chartLamp.position.set(-width * 0.28, -0.3, -0.6);
+    this.group.add(this.chartLamp);
   }
 
   /**
@@ -153,6 +160,17 @@ export class BridgeInterior {
   }
 
   setVisible(v) { this.group.visible = v; }
+
+  /**
+   * Instrument lighting against daylight. dayFactor 1 is full day, 0 is night.
+   * A darkened bridge is a night condition; in daylight the displays are just
+   * screens and should not light the room.
+   */
+  setDaylight(dayFactor) {
+    const night = 1 - Math.min(1, Math.max(0, dayFactor));
+    if (this.glow) this.glow.intensity = 0.35 + 6.15 * night;
+    if (this.chartLamp) this.chartLamp.intensity = 0.2 + 2.8 * night;
+  }
 
   dispose() {
     this.group.parent?.remove(this.group);

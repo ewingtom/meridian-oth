@@ -903,9 +903,18 @@ void main() {
     if (d > uIsland[i].z * 2.2) continue;
     // Break the circle: the shoal has to follow the island's plan shape, and a
     // perfectly round ring of turquoise around a lumpy island is the tell.
+    // The lobe has to be a NUDGE, not a search.
+    //
+    // At 0.55 this wandered the notional coastline by more than half the
+    // island's radius — plus or minus 900 m on a 3.4 km island. The surf band is
+    // tens of metres wide, so a ring that moves by 900 m almost never coincides
+    // with the actual waterline, and an art review's shader probe found no surf
+    // anywhere in near-shore water even though shoreR itself was correct. The
+    // lobe exists to stop the shoal being a perfect circle; a few per cent does
+    // that without throwing the surf line into open water.
     float ang = atan(rel.y, rel.x);
     float lobe = fbm(vec2(cos(ang), sin(ang)) * 1.7 + uIsland[i].w * 0.01) - 0.5;
-    float edge = uIsland[i].z * (1.0 + lobe * 0.55);
+    float edge = uIsland[i].z * (1.0 + lobe * 0.10);
     // Depth proxy: how far outside the plan radius this water is.
     float outside = d - edge;
     // HUG THE COAST — properly this time.

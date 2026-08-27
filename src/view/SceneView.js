@@ -585,6 +585,7 @@ export class SceneView {
           this._bridgeUnit = bu;
         }
         this._bridge?.setVisible(true);
+        this._bridge?.setDaylight(this.sky.dayFactor ?? 1);
       } else if (this._bridge) {
         this._bridge.setVisible(false);
       }
