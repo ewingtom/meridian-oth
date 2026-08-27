@@ -693,7 +693,21 @@ export class SceneView {
         // read light against the sea; a merchant is whatever her owner painted
         // her, and a red hull throws a red smear, which is half of why a
         // shipping lane looks like a shipping lane.
-        color: u.neutral ? [0.40, 0.36, 0.33] : (u.side === SIDE.RED ? [0.34, 0.36, 0.38] : [0.46, 0.49, 0.52]),
+        /*
+         * What the water mirrors is the hull's SIDE, not its sunlit topside.
+         *
+         * These were the topside tones — around 0.49 linear, which is close
+         * enough to the sky the reflection displaces that it changed almost
+         * nothing. A hull side sits under the deck edge in its own shadow and
+         * reads far darker than that; a review measured the sea beneath a ship at
+         * 184 against 151 beside it and reasonably concluded there was no
+         * reflection at all, because a reflected ship darkens water.
+         *
+         * A merchant is whatever her owner painted her, and a red hull throws a
+         * red smear, which is half of why a shipping lane looks like a shipping
+         * lane from a long way off.
+         */
+        color: u.neutral ? [0.19, 0.14, 0.12] : (u.side === SIDE.RED ? [0.15, 0.16, 0.17] : [0.20, 0.22, 0.24]),
         d: Math.hypot(cam.rx(u.x) - camera.position.x, cam.rz(u.z) - camera.position.z),
       });
     }

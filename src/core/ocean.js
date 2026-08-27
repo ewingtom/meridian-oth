@@ -657,6 +657,7 @@ void main() {
   float wakeTrough = 0.0;
   float nearShipMax = 0.0;
   vec3 hullRefl = vec3(0.0);
+  float hullReflW = 0.0;
   for (int i = 0; i < NUM_WAKES; i++) {
     if (uWakeDim[i].w < 0.5) continue;
     vec2 sp = uWakePos[i].xy;
@@ -728,7 +729,9 @@ void main() {
         // grazing and more broken.
         float depthFade = mix(0.35, 1.0, smoothstep(dTop, dShip, alongB));
 
-        hullRefl += uWakeCol[i].rgb * inBand * chopBreak * depthFade;
+        float w = inBand * chopBreak * depthFade;
+        hullRefl += uWakeCol[i].rgb * w;
+        hullReflW += w;
       }
     }
 
@@ -1090,6 +1093,26 @@ void main() {
   contactDim *= mix(0.84, 1.0, 1.0 - besideHullMax * 0.92);
   contactDim *= mix(0.45, 1.0, 1.0 - waterlineMax);
   contactDim *= mix(0.75, 1.0, 1.0 - nearShipMax * 0.85);
+  /*
+   * A reflection REPLACES what the water would otherwise be mirroring.
+   *
+   * This was additive — base += hullRefl * 1.15 — so a ship could only ever make
+   * the water under it brighter. A review measured exactly that: the sea
+   * directly beneath the hull read 184 against 151 on the same screen rows off
+   * to the side, and concluded there was no reflection at all, because a
+   * reflected ship makes water DARKER. Which it does: a haze-grey topside sits
+   * around 0.25 albedo and the sky it displaces is far brighter, so where the
+   * hull occupies the mirrored direction the water loses light rather than
+   * gaining it.
+   *
+   * So the hull goes into reflColor, weighted by how much of that direction it
+   * covers, before the Fresnel mix decides how much of the pixel is mirror at
+   * all. That also puts it where it belongs physically: strongest at a grazing
+   * angle, which is where a real ship lays its reflection toward you.
+   */
+  float hullW = clamp(hullReflW, 0.0, 1.0);
+  reflColor = mix(reflColor, hullRefl / max(1e-4, hullReflW), hullW);
+
   float fresnelUse = fresnel * mix(0.55, 0.96, contactKill) * (1.0 - nearShipMax * 0.25);
   vec3 base = mix(waterColor, reflColor, fresnelUse + horizonBoost * 0.28 * contactDim);
 
@@ -1141,10 +1164,8 @@ void main() {
   // and only that one is allowed to be dramatic.
   base *= mix(0.82, 1.0, sunLit);
   base *= mix(0.58, 1.0, hullShadow);
-  // The hull laid down the water toward the eye. Additive over the shadow —
-  // physically it IS extra light arriving from the ship rather than from the
-  // sky, and it has to survive the shadow it usually sits inside.
-  base += clamp(hullRefl, 0.0, 3.0) * 1.15;
+  // (The hull's reflection is applied into reflColor above, before the Fresnel
+  // mix, rather than added on here.)
   // Shaded water is not merely dimmer: it loses the warm forward-scatter and
   // reads a shade cooler and greener than the lit sea around it.
   // Shadowed water is lit by the sky alone, so it goes markedly cooler as well
