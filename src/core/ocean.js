@@ -908,16 +908,27 @@ void main() {
     float edge = uIsland[i].z * (1.0 + lobe * 0.55);
     // Depth proxy: how far outside the plan radius this water is.
     float outside = d - edge;
-    // Hug the coast. The shelf used to reach nearly two kilometres out and read
-    // as a flat turquoise band painted around the island rather than as water
-    // shoaling onto it.
-    shallow = max(shallow, 1.0 - smoothstep(0.0, edge * 0.20, max(0.0, outside)));
+    // HUG THE COAST — properly this time.
+    //
+    // At edge * 0.20 the shelf still reached a kilometre offshore on a 5 km
+    // island, and measured 0.97 saturated across the whole near-shore band: a
+    // flat turquoise swimming pool around the island rather than water shoaling
+    // onto it. Squared falloff over a few hundred metres puts the colour where
+    // the bottom actually comes up.
+    float shoalT = clamp(max(0.0, outside) / (edge * 0.06), 0.0, 1.0);
+    shallow = max(shallow, (1.0 - shoalT) * (1.0 - shoalT));
     // The break itself: a band just outside the land, pulsing with the swell so
     // it reads as sets arriving rather than as a painted ring.
-    float band = 1.0 - smoothstep(0.0, edge * 0.075, abs(outside - edge * 0.045));
+    // SURF IS A NARROW LINE AT THE BEACH, not a wide ring offshore. This was a
+    // 390-metre-wide band centred 234 metres out, which is so diffuse it reads
+    // as nothing at all — an art review found no shoreline surf. Tens of metres
+    // wide, right where the water meets the land.
+    float band = 1.0 - smoothstep(0.0, edge * 0.012, abs(outside - edge * 0.008));
     float sets = 0.55 + 0.45 * sin(d * 0.011 - uTime * 1.15
       + fbm(vWorldPos.xz * 0.0022) * 6.0);
-    shore = max(shore, band * sets * smoothstep(0.0, 1.0, uWaveAmp));
+    // Surf runs even on a calm — a swell always reaches a beach — so the floor
+    // is well above zero rather than scaling from nothing with the sea state.
+    shore = max(shore, band * sets * (0.45 + 0.55 * smoothstep(0.0, 1.2, uWaveAmp)));
   }
   // Only break the surf line up where there IS a surf line.
   if (shore > 0.001) shore *= 0.45 + 0.55 * fbm(vWorldPos.xz * 0.35 - uTime * 0.5);

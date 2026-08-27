@@ -276,6 +276,33 @@ export class SceneView {
             o.castShadow = false;
             this._terrainShader(o.material);
           });
+          // MEASURE THE ACTUAL WATERLINE.
+          //
+          // The ocean needs to know where this island really meets the sea so it
+          // can shoal inside that and break surf just outside it. The scenario's
+          // plan radius is not that number — the mesh is scaled by its bounding
+          // SPAN, and its zero-height contour sits well inside the span. On the
+          // first island the difference is 5,200 m against 3,250: the surf was
+          // being drawn two kilometres out to sea.
+          //
+          // Take the mean radius of the vertices near sea level, after scaling.
+          {
+            const sc = g.scale.x || 1;
+            let sum = 0, n = 0;
+            const v = new THREE.Vector3();
+            g.traverse((o) => {
+              if (!o.isMesh) return;
+              const pos = o.geometry.getAttribute('position');
+              const step = Math.max(1, Math.floor(pos.count / 4000));
+              for (let i = 0; i < pos.count; i += step) {
+                v.fromBufferAttribute(pos, i);
+                if (Math.abs(v.y * sc) > 6) continue;      // near the waterline only
+                sum += Math.hypot(v.x, v.z) * sc; n++;
+              }
+            });
+            entry.shoreR = n > 30 ? sum / n : spec.radius;
+          }
+
           const holder = new THREE.Group();
           holder.add(g);
           holder.renderOrder = -1;
@@ -416,8 +443,18 @@ export class SceneView {
         .sort((a, b) => a.d - b.d).slice(0, 4);
       for (let i = 0; i < 4; i++) {
         if (i < near.length) {
-          const sp = near[i].it.spec;
-          arr[i].set(cam.rx(sp.x), cam.rz(sp.z), sp.radius, sp.height);
+          const it = near[i].it;
+          const sp = it.spec;
+          // MEASURED shoreline, not the scenario's plan radius.
+          //
+          // uIsland.z is what the ocean shader treats as the water's edge — it
+          // shoals inside it and breaks surf just outside it. Handing it the
+          // spec radius put the surf line about two kilometres out to sea from
+          // where the terrain mesh actually meets the water, because the GLB is
+          // scaled by its bounding span while its z = 0 contour sits well inside
+          // that. An art review found no shoreline surf; there was surf, drawn
+          // in open water where nothing was there to break on.
+          arr[i].set(cam.rx(sp.x), cam.rz(sp.z), it.shoreR || sp.radius, sp.height);
         } else arr[i].set(0, 0, 0, 0);
       }
     }
