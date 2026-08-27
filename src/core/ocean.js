@@ -1544,6 +1544,13 @@ export class OceanField {
         uEnvMap: this.uniforms.uEnvMap,
         uWaveAmp: this.uniforms.uWaveAmp,
         uEarthR: this.uniforms.uEarthR,
+        // SHARE the exposure uniform with the main ocean material. The far-sea
+        // shader inverts the grade pass's ACES like every other hand-authored
+        // surface, and it divides by this — so leaving it out of the skirt's
+        // uniform block meant three.js bound zero, the division produced
+        // infinity, and the whole disc rendered BLACK. It drew as a hard dark
+        // band straight across the horizon in every wide shot.
+        uGradeExposure: this.uniforms.uGradeExposure,
         uInner: { value: FAR_SEA_INNER },
         uWaveFieldR: { value: WAVE_FIELD_R * 0.985 },
         uCloudCoverage: this.uniforms.uCloudCoverage,

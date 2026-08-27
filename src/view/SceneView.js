@@ -855,13 +855,46 @@ export class SceneView {
         // wider than the missile it came off. A booster-burning SAM does throw a
         // real column, so that one stays fat.
         const sam = o.category === 'SAM';
+        // SMOKE, not a thread.
+        //
+        // An art review counted sixty-seven rounds in flight and eight
+        // detonations and found "a few grey smudges" — in a game whose whole
+        // subject is missile combat. A cruise missile's trail was one and a half
+        // metres wide at 0.30 opacity and gone in twenty-two seconds: at nine
+        // hundred km/h that is an invisible thread that has faded before it is
+        // two hundred metres long.
+        //
+        // The reasoning above — that a sea-skimming turbofan does not throw a
+        // column like a booster — is right, and the fix is not to make it fat at
+        // the nozzle. Real exhaust EXPANDS as it dissipates: narrow and dense
+        // where it leaves the tailpipe, wide and faint far behind. So width now
+        // grows with age instead of shrinking, opacity falls as it widens, and
+        // it lives long enough to draw the flight path — which is tactically
+        // useful too, because a trail across the sky is how you find where a
+        // salvo came from.
         trail = new TrailRibbon(this.scene, {
-          capacity: 190, life: sam ? 5 : 22,
-          color: hot ? 0xd8d2c8 : 0xc9ccd0,
+          capacity: 220, life: sam ? 9 : 52,
+          color: hot ? 0xe6e2da : 0xdcdfe3,
           map, orientation: 'billboard', uvRepeat: 1, renderOrder: 3,
-          opacity: sam ? 0.85 : 0.30,
-          widthFn: (age, life, uu) => (sam ? 6 : 1.5) * (0.3 + (1 - uu) * (sam ? 2.6 : 1.6)),
-          alphaFn: (age, life) => Math.max(0, 1 - age / life) * (sam ? 0.75 : 0.42),
+          opacity: 1.0,
+          // uu = 0 at the oldest sample, 1 at the round itself.
+          widthFn: (age, life, uu) => {
+            // LINEAR spread, not quadratic. Squaring it put almost all the width
+            // in the last few samples, so a young trail rendered as a ball stuck
+            // to the missile rather than a plume tapering away behind it.
+            const spread = 1 - uu;
+            return (sam ? 7 : 3.0) * (0.5 + spread * (sam ? 3.5 : 3.0));
+          },
+          alphaFn: (age, life, uu) => {
+            // This curve has to PEAK somewhere visible. The version before it
+            // multiplied four sub-one terms together and topped out at 0.19,
+            // against a material opacity of 0.30 — an effective 0.06, which is
+            // why every review found no smoke: the ribbon was always being
+            // drawn, and was always very nearly transparent.
+            const fade = Math.max(0, 1 - age / life);    // dissipates with age
+            const form = Math.min(1, (1 - uu) * 30);     // forms just aft of the nozzle
+            return fade * form * (sam ? 0.72 : 0.55);
+          },
         });
       }
     } else {
