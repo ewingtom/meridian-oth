@@ -314,8 +314,20 @@ void main() {
     vec3 p = uCamPos + rd * t;
     float f = clamp((p.y - SLAB_LO) / (SLAB_HI - SLAB_LO), 0.0, 1.0);
     // Vertical density profile — a cumulus has a base, a body and a broken top.
-    float prof = sin(f * 3.14159);
-    prof *= prof;
+    /*
+     * A cumulus is flat-bottomed and domed; a stratus deck is not.
+     *
+     * sin squared is symmetric about mid-slab, which is right for a layer and
+     * wrong for a heap cloud: cumulus condense at a definite level and build
+     * upward from it, so the base is a hard floor and the top is what billows.
+     * Blend between the two on coverage, which is the only thing that
+     * distinguishes them here.
+     */
+    float cumulus = smoothstep(0.30, 0.62, uCloudCoverage);
+    float layered = sin(f * 3.14159);
+    layered *= layered;
+    float heaped = smoothstep(0.0, 0.14, f) * (1.0 - smoothstep(0.42, 1.0, f));
+    float prof = mix(layered, heaped, cumulus);
     // Shear the field with height.
     //
     // The cloud shape is a 2-D field extruded up the slab, so every sample along

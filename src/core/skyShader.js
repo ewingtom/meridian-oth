@@ -473,7 +473,24 @@ float cf_shapeLod(vec2 uv, float thr, float lod) {
   // A C1 ramp through the threshold removes the corner and the terracing with
   // it. The blend width is the same one cf_softShape uses, so the deck and the
   // shadows it casts on the sea stay consistent with each other.
-  float d = smoothstep(t - 0.06, t + 0.30, f.r);
+  /*
+   * How sharp the cloud's edge is depends on what kind of cloud it is.
+   *
+   * A fixed 0.36-wide ramp means density only saturates at f.r > t + 0.30. At
+   * fair-weather coverage the threshold is 0.52, so a cell had to reach 0.82 on
+   * a field averaging 0.44 before it was ever opaque — which essentially never
+   * happens. The result was a regime named SCATTERED CUMULUS with no cumulus in
+   * it: permanently thin, translucent wisps, called the worst sky in the game by
+   * an art review, and rightly.
+   *
+   * Cumulus have hard boundaries — a strong updraft condensing at a definite
+   * level — while stratus fade out at the edges. So narrow the ramp as coverage
+   * falls. It stays a C1 smoothstep either way, which is what keeps the
+   * silhouette off the sixteen march steps and out of the terracing it used to
+   * quantise into.
+   */
+  float w = mix(0.30, 0.15, smoothstep(0.30, 0.62, thr));
+  float d = smoothstep(t - 0.06, t + w, f.r);
   return d * d * (3.0 - 2.0 * d);
 }
 
