@@ -4,6 +4,7 @@ import { OceanField, WIND_DIR } from '../core/ocean.js';
 import { CloudLayer } from '../core/CloudLayer.js';
 import { bakeCloudField, bakeSeaField } from '../core/CloudField.js';
 import { RainField } from '../core/Rain.js';
+import { SKY_LAYER } from '../core/SkyLayerPass.js';
 
 const _rainVp = new THREE.Vector2();
 import { buildIsland, makeIslandMaterial } from '../core/Islands.js';
@@ -148,6 +149,12 @@ export class SceneView {
     this.ocean.uniforms.uSeaField.value = this.seaField;
 
     this.clouds = new CloudLayer(this.ocean.uniforms);
+    // The sky dome and the cloud deck are pure background: drawn behind
+    // everything, depth-tested against by nothing. Putting them on their own
+    // layer is what lets the pipeline shade them at half resolution.
+    this.sky.sky.layers.set(SKY_LAYER);
+    this.clouds.mesh.layers.set(SKY_LAYER);
+
     this.rain = new RainField(this.ocean.uniforms);
     this.scene.add(this.rain.mesh);
 

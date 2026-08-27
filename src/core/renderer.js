@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SkyLayerPass, SKY_LAYER } from './SkyLayerPass.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -193,6 +194,7 @@ export class RenderPipeline {
   setup(scene, camera) {
     this._scene = scene;
     this._camera = camera;
+    this.skyPass = new SkyLayerPass(this.renderer, scene, camera);
 
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -337,6 +339,12 @@ export class RenderPipeline {
     this._composerHealthy = false;
     this._composerFail = 0;
     this._probeFrames = 0;
+
+    // Exquisite renders the sky at full resolution; everything else halves it.
+    if (this.skyPass) {
+      this.skyPass.scale = q === 'exquisite' ? 1.0 : 0.5;
+      this.skyPass.enabled = q !== 'exquisite';
+    }
 
     if (this.ssaoPass) {
       // ULTRA only. Ground-truth AO is a full-frame depth + normal pre-pass and
@@ -548,8 +556,13 @@ export class RenderPipeline {
     this._tuneResolution();
     if (this.gradePass) this.gradePass.uniforms.uTime.value = elapsed;
 
+    // Sky and clouds first, at half resolution, into their own target. The blit
+    // quad in the scene carries the result and the main pass skips that layer.
+    this.skyPass?.render();
+
     if (!this._wantComposer || !this.composer) {
       this.renderer.render(this._scene, this._camera);
+      this.skyPass?.restore();
       return;
     }
 
@@ -580,6 +593,7 @@ export class RenderPipeline {
     info.reset();
     try {
       this.composer.render();
+      this.skyPass?.restore();
       const total = info.render.triangles;
       if (total <= 10) {
         this._composerFail = (this._composerFail || 0) + 1;
