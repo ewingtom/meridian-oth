@@ -1061,6 +1061,24 @@ class Game {
    * so the water moves, the wake streams and the light changes while the player
    * reads the blurb.
    */
+  /**
+   * Camera yaw that looks toward the sun, in this camera's convention (the view
+   * direction is +sin(yaw), +cos(yaw), so a yaw in compass radians looks along
+   * that bearing). Falls back to the guide's heading if the sky has not solved
+   * a sun position yet.
+   */
+  _dawnYaw(g) {
+    // From the clock, not from the sky. The menu camera is placed before
+    // SceneView has ever solved a sun position, so reading the sky's azimuth
+    // there silently fell back to the ship's heading and pointed the shot away
+    // from the light — which is the bug this was written to fix. Same curve as
+    // the one in SceneView.update: east at sunrise, south at noon, west at
+    // sunset over a sixteen-hour day.
+    const hours = ((this.world?.time ?? 0) / 3600) % 24;
+    const az = 90.0 + (hours - 5.0) * (180.0 / 16.0);
+    return Number.isFinite(az) ? THREE.MathUtils.degToRad(az) : (g.heading + Math.PI * 0.62);
+  }
+
   _attractShot() {
     const g = this.world.blueGuide;
     if (!g) return;
@@ -1070,7 +1088,13 @@ class Game {
     cam.focusTarget.copy(cam.focus);
     cam.dist = cam.distTarget = 300;
     cam.pitch = cam.pitchTarget = 0.085;
-    cam.yaw = cam.yawTarget = g.heading + Math.PI * 0.62;
+    // Face the dawn. The menu camera used to be aimed off the ship's heading,
+    // which meant the best thing in the frame — a sun three degrees up laying a
+    // path down the water — was usually somewhere behind the viewer. Sitting
+    // the sun about thirty degrees off the axis keeps it out of the middle,
+    // where the title block is, and puts the hull in front of the light rather
+    // than beside it.
+    cam.yaw = cam.yawTarget = this._dawnYaw(g) + 0.52;
     this._attract = { yaw: cam.yaw };
   }
 
@@ -1107,7 +1131,9 @@ class Game {
     cam.dist = 1700;
     cam.distTarget = 1700;
     cam.pitch = cam.pitchTarget = 0.22;
-    cam.yaw = cam.yawTarget = g.heading + Math.PI * 0.78;
+    // Land the pull-out looking into the sunrise, allowing for the 0.55 rad the
+    // move itself adds.
+    cam.yaw = cam.yawTarget = this._dawnYaw(g) + 0.42 - 0.55;
     this._openT = 0;
     this._opening = { fromDist: 1700, toDist: 42000, fromYaw: cam.yaw, dur: 5.5 };
   }
