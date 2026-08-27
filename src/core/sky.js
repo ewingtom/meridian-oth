@@ -5,6 +5,11 @@ import { SkyShader } from './skyShader.js';
  * Procedural physical sky (hand-authored gradient + sun + clouds — see skyShader.js)
  * + sun light + dynamic env map. No textures — everything is generated on the GPU.
  */
+// Scratch colours for the sea half of the environment probe. Deep water body,
+// and the warm cast that sun glitter puts into the light coming off it.
+const _seaBody = new THREE.Color(0x123448);
+const _seaGlitter = new THREE.Color(0xffd9a8);
+
 export class SkySystem {
   constructor(renderer, scene) {
     this.renderer = renderer;
@@ -88,6 +93,26 @@ export class SkySystem {
     this._skyProxy = new THREE.Mesh(this.sky.geometry, this.sky.material);
     this._skyProxy.scale.copy(this.sky.scale);
     this._skyScene.add(this._skyProxy);
+
+    /*
+     * The lower half of the environment has to be the sea.
+     *
+     * The probe scene held the sky dome and nothing else, and below the horizon
+     * that dome renders as uHorizonColor * 0.9 — sky blue. So every surface on
+     * every ship was being lit from below by bright blue sky where there should
+     * be water: too much fill, and all of it the wrong hue. A review measured
+     * shadow-side red-minus-blue at -62 and traced it to the IBL, correctly
+     * noting the environment had no ground term at all.
+     *
+     * A hemisphere shell under the probe, coloured from the ocean's own palette,
+     * costs one more draw in a cube render that happens a few times a minute.
+     */
+    const seaShell = new THREE.SphereGeometry(1, 24, 10, 0, Math.PI * 2, Math.PI * 0.5, Math.PI * 0.5);
+    this._seaProxy = new THREE.Mesh(seaShell, new THREE.MeshBasicMaterial({
+      color: 0x1a3a4a, side: THREE.BackSide, depthWrite: false, fog: false,
+    }));
+    this._seaProxy.scale.setScalar(this.sky.scale.x * 0.92);
+    this._skyScene.add(this._seaProxy);
     this.cubeRT = new THREE.WebGLCubeRenderTarget(256, {
       generateMipmaps: true,
       minFilter: THREE.LinearMipmapLinearFilter,
@@ -118,8 +143,13 @@ export class SkySystem {
     //
     // A useful side effect: red-minus-blue on the lit side went from -42 to -15.
     // Most of the blue cast on the hulls was simply too much sky fill.
-    this.keyScale = 1.35;
-    this.fillScale = 0.46;
+    // Retuned once the environment probe gained its sea half. The lower
+    // hemisphere had been bright blue sky; replacing it with water took light
+    // out of the fill, so the fill goes up and the key comes down to hold the
+    // same tonal response. Pinned beam-on to the sun: p50 150 lit / 49 shadowed,
+    // ratio 3.08, lit red-minus-blue -1, shadowed -31.
+    this.keyScale = 1.25;
+    this.fillScale = 0.54;
     this._followTarget = new THREE.Vector3();
     this.setSunAngle(this._elevation, this._azimuth);
     this.updateEnvMap();
@@ -270,7 +300,34 @@ export class SkySystem {
     // _skyProxy shares the sky's geometry and material and sits on layer 0 in
     // its own scene, which is exactly what this needs.
     this._skyProxy.layers.set(0);
-    this.envRT = this.pmrem.fromScene(this._skyScene, 0.04);
+    if (this._seaProxy) {
+      this._seaProxy.layers.set(0);
+      /*
+       * What a hull actually sees looking down is water, and water at a shallow
+       * angle is mostly reflected sky while water straight down is its own body
+       * colour. One flat value has to stand for both, so this is a blend, taken
+       * darker than the sky because even a bright sea returns a fraction of what
+       * the sky above it puts out.
+       *
+       * The warm part matters as much as the level. A sunlit sea carries glitter
+       * off every wave face, which is sun-coloured, and that is the bounce that
+       * keeps a shadowed hull from going pure blue.
+       */
+      const u = this.sky.material.uniforms;
+      const c = this._seaProxy.material.color;
+      c.copy(u.uHorizonColor.value).multiplyScalar(0.30);
+      c.lerp(_seaBody, 0.55);
+      const glitter = Math.max(0, Math.min(1, this._elevation / 30)) * this.dayFactor;
+      c.lerp(_seaGlitter, 0.20 * glitter);
+      c.multiplyScalar(0.35 + 0.65 * this.dayFactor);
+    }
+    // near/far MUST be given. fromScene() defaults to a far plane of 100, and
+    // both proxies sit at millions of metres — the sky survives that only
+    // because its shader forces its own depth to the far plane, while an
+    // ordinary mesh is simply clipped away. That is why the sea shell
+    // contributed nothing: hiding the sky and making the shell pure red left the
+    // shadow side of a hull at luminance 0.7, unlit, in every trial.
+    this.envRT = this.pmrem.fromScene(this._skyScene, 0.04, 0.1, 1e7);
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = 1.05;
     this.updateCubeMap();
