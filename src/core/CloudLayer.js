@@ -476,10 +476,36 @@ export class CloudLayer {
       side: THREE.DoubleSide,
       fog: false,
     });
+    // Authored for daylight; setDaylight takes them down once the sun is gone.
+    this._litBase = this.material.uniforms.uLitColor.value.clone();
+    this._shadowBase = this.material.uniforms.uShadowColor.value.clone();
     this.mesh = new THREE.Mesh(buildDisc(), this.material);
     this.mesh.frustumCulled = false;
     this.mesh.renderOrder = 1;
     this.mesh.position.y = BASE_H;
+  }
+
+  // A cloud deck is not self-luminous.
+  //
+  // uLitColor and uShadowColor were fixed constants — 0xf6f9fc and 0x9aa6b4 —
+  // so the deck was lit for noon at every hour of the night. A frame at 0100
+  // showed a bright white overcast against a black sky full of stars, which is
+  // the one lighting arrangement that cannot occur.
+  //
+  // The deck does not go black: at night it is lit by airglow and by the sky
+  // itself, and against a dark sky it still reads as a slightly lighter mass.
+  // So take the level almost all the way down and let what is left settle
+  // toward the colour of the sky it is sitting in front of.
+  setDaylight(day, nightSky) {
+    const u = this.material.uniforms;
+    const k = 0.05 + 0.95 * day;
+    const n = 1 - day;
+    u.uLitColor.value.copy(this._litBase).multiplyScalar(k);
+    u.uShadowColor.value.copy(this._shadowBase).multiplyScalar(k);
+    if (nightSky) {
+      u.uLitColor.value.lerp(nightSky, n * 0.55);
+      u.uShadowColor.value.lerp(nightSky, n * 0.70);
+    }
   }
 
   update(camera) {
