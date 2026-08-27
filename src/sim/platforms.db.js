@@ -86,7 +86,7 @@ export const PLATFORMS = {
     display: 'San Antonio-class amphibious transport dock',
     role: 'HIGH VALUE UNIT. Carries the landing force. She cannot defend herself and she cannot outrun anything.',
     length: 208, beam: 32, mastHeight: 40, draft: 7, displacement: 25000,
-    rcs: 12000, acoustic: 1.8, model: 'merchant_ship',
+    rcs: 12000, acoustic: 1.8, model: 'lpd',
     maxSpeed: 11.3, accelTime: 160, turnRate: 0.03,
     hp: 210, crew: 360, hvu: true,
     sensors: [
@@ -107,7 +107,7 @@ export const PLATFORMS = {
     display: 'Lewis and Clark-class dry cargo ship',
     role: 'Fleet replenishment. Without her the task force has four days of missiles and then it is a very expensive parade.',
     length: 210, beam: 32, mastHeight: 36, draft: 9, displacement: 41000,
-    rcs: 18000, acoustic: 2.0, model: 'merchant_ship',
+    rcs: 18000, acoustic: 2.0, model: 'take',
     maxSpeed: 10.3, accelTime: 200, turnRate: 0.025,
     hp: 150, crew: 130, hvu: true, softHvu: true,
     sensors: [
@@ -356,7 +356,7 @@ export const PLATFORMS = {
     display: 'Fishing trawler',
     role: 'Fishing fleet. Acoustic clutter, radar clutter, and occasionally an intelligence collector with a very good ESM mast.',
     length: 48, beam: 10, mastHeight: 14, draft: 4, displacement: 900,
-    rcs: 420, acoustic: 1.4, model: 'escort_hull',
+    rcs: 420, acoustic: 1.4, model: 'trawler',
     maxSpeed: 6.2, accelTime: 120, turnRate: 0.05,
     hp: 12, crew: 14, neutral: true,
     sensors: [

@@ -277,8 +277,28 @@ function _tempVertexAO(m) {
  */
 const PAINT_ALBEDO_GAIN = 2.4;
 const PAINT_MAX_METALNESS = 0.12;
+
+/*
+ * The submarine needs to be in here too, and for a subtler reason than the
+ * warships.
+ *
+ * Its two surfaces are named SubHull and Rubber — pressure hull and anechoic
+ * tile. The pattern below matched SubHull, because the word contains "hull", and
+ * missed Rubber entirely. So the two halves of the same boat were being lit 2.4x
+ * apart: one calibrated, one not. Anechoic coating IS genuinely near-black — the
+ * bake measures sRGB 52 against the destroyer's 85, and that is correct, a
+ * submarine is the darkest thing on the ocean — but it has to be COHERENTLY
+ * near-black, and it has to read as a shape rather than a hole.
+ *
+ * What makes a real submarine legible in a photograph is not its albedo, which
+ * is almost nothing; it is that the casing is wet and glossy and carries a
+ * reflection of the sky along its curve. The bake already has that right
+ * (roughness 0.40, metalness 0.02), so bringing the whole boat onto one gain is
+ * enough: it stays much darker than any surface ship, and the specular does the
+ * describing.
+ */
 function _calibratePaint(c, name) {
-  if (!/hull|super|deck|paint|grey|gray|haze|boot|keel|nonskid|mast|funnel|house/.test(name)) return;
+  if (!/hull|super|deck|paint|grey|gray|haze|boot|keel|nonskid|mast|funnel|house|rubber|anechoic|casing/.test(name)) return;
   c.metalness = Math.min(c.metalness ?? 1, PAINT_MAX_METALNESS);
   c.color.multiplyScalar(PAINT_ALBEDO_GAIN);
 }
