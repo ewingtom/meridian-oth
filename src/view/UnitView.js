@@ -796,6 +796,24 @@ export class UnitView {
       m.onBeforeCompile = (shader, renderer) => {
         prevOBC?.call(m, shader, renderer);
         shader.uniforms.uSurfSeed = { value: rustSeed };
+        // Half-extents of this mesh in its own object space. Weathering has to
+        // know which way the ship is long and where its waterline and upperworks
+        // are; without it every stain is placed in raw metres and lands in a
+        // different spot on a 155 m destroyer than on a 30 m trawler.
+        // From the MESH, not the material — materials have no geometry, so this
+        // silently fell through to a 10 m cube for every hull in the game.
+        if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+        const bb = o.geometry.boundingBox;
+        const half = bb
+          ? [Math.max(0.5, (bb.max.x - bb.min.x) * 0.5),
+             Math.max(0.5, (bb.max.y - bb.min.y) * 0.5),
+             Math.max(0.5, (bb.max.z - bb.min.z) * 0.5)]
+          : [10, 10, 10];
+        const ctr = bb
+          ? [(bb.max.x + bb.min.x) * 0.5, (bb.max.y + bb.min.y) * 0.5, (bb.max.z + bb.min.z) * 0.5]
+          : [0, 0, 0];
+        shader.uniforms.uSurfHalf = { value: new THREE.Vector3(...half) };
+        shader.uniforms.uSurfCtr = { value: new THREE.Vector3(...ctr) };
         shader.uniforms.uSurfHull = { value: isHull ? 1 : 0 };
         shader.uniforms.uSurfBaked = { value: baked ? 1 : 0 };
         shader.vertexShader = shader.vertexShader
@@ -809,6 +827,8 @@ varying vec3 vWorldNrm;
 uniform float uSurfSeed;
 uniform float uSurfHull;
 uniform float uSurfBaked;
+uniform vec3 uSurfHalf;
+uniform vec3 uSurfCtr;
 float shHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float shNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
@@ -821,6 +841,22 @@ float shFbm(vec2 p) {
   for (int i = 0; i < 4; i++) { v += a * shNoise(p); p *= 2.03; a *= 0.5; }
   return v;
 }
+/*
+ * Weathering carried between injection points.
+ *
+ * The colour work happens in map_fragment and the roughness work in
+ * roughnessmap_fragment, and each is wrapped in its own braces, so a local
+ * declared in the first is gone by the second. three.js emits map_fragment
+ * first, so these are written there and read here.
+ *
+ * Corrosion product is powdery and soot is matte: both scatter where the paint
+ * around them reflects, and that is what makes a streak read as a streak in
+ * raking light instead of as a decal.
+ */
+float gRust = 0.0;
+float gSoot = 0.0;
+float gSalt = 0.0;
+
 // A thin dark line at a fixed spacing, with a soft shoulder: a plate seam.
 float shSeam(float x, float period, float width) {
   float t = abs(fract(x / period + 0.5) - 0.5) * period;
@@ -843,20 +879,104 @@ float shSeam(float x, float period, float width) {
   float plateId = shHash(floor(vec2(P.z / 2.4, P.y / 1.35)) + uSurfSeed * 13.0);
   float plateTone = (plateId - 0.5) * 0.055;
 
+  /*
+   * Normalised hull coordinates. Q runs -1..1 along each axis of this mesh's own
+   * bounding box, so a stain lands in the same PLACE on a destroyer and on a
+   * trawler instead of at the same number of metres.
+   */
+  vec3 Q = clamp((P - uSurfCtr) / uSurfHalf, vec3(-1.0), vec3(1.0));
+  // Which way the ship is long, and how far aft we are along it: 0 at the bow,
+  // 1 at the transom.
+  float lenQ = uSurfHalf.z > uSurfHalf.x ? Q.z : Q.x;
+  float aft = clamp(lenQ * 0.5 + 0.5, 0.0, 1.0);
+
   // ── grime and salt ──────────────────────────────────────────────────────
   float grime = shFbm(P.xz * 0.55 + uSurfSeed * 20.0);
-  float salt = up * smoothstep(0.35, 0.85, shFbm(P.xz * 0.9 + 7.0)) * 0.12;
+  /*
+   * Salt bloom. Recentred, like everything else below.
+   *
+   * shFbm averages about 0.44 and rarely passes 0.7, so a smoothstep opening at
+   * 0.35 and closing at 0.85 spent most of its range above anything the noise
+   * ever produced. It also sat highest on the horizontal surfaces, which is
+   * backwards: spray dries on the topsides and the superstructure faces that
+   * take it green, and it is heaviest forward where the bow throws it.
+   */
+  float spray = mix(0.35, 1.0, 1.0 - aft) * (0.35 + 0.65 * sideness);
+  float salt = smoothstep(0.30, 0.62, shFbm(P.xz * 0.55 + 7.0)) * spray * 0.085;
+  salt *= 1.0 - smoothstep(0.10, 0.55, Q.y);          // low down, where spray reaches
 
-  // ── rust weeping downward ───────────────────────────────────────────────
-  // A drip is NARROW across and LONG down, so the noise has to be high frequency
-  // horizontally and very low frequency vertically. Which horizontal axis that
-  // is depends on which way the plate faces, so blend by the normal — otherwise
-  // the streaks run the wrong way round on half the ship and read as scratches.
+  /*
+   * Rust weeping downward.
+   *
+   * A drip is NARROW across and LONG down, so the noise is high frequency
+   * horizontally and very low frequency vertically. Which horizontal axis that
+   * is depends on which way the plate faces, so blend by the normal — otherwise
+   * the streaks run the wrong way round on half the ship and read as scratches.
+   *
+   * The thresholds were the whole problem. streak opened at 0.66 and closed at
+   * 0.99 on a field whose mean is 0.44, then was multiplied by a SECOND gate
+   * opening at 0.30, then by 0.45 again on any baked asset. Three stacked gates
+   * on a distribution centred well below the first one: a review measured a
+   * warm-pixel fraction of 0.0000 over 92,665 hull pixels and red-minus-blue
+   * varying by a standard deviation of 15.8 across the entire ship. One flat
+   * grey from stem to stern, which is what a correct BRDF gives you when there
+   * is nothing in the albedo for it to reveal.
+   *
+   * Rust does not appear at random either. It weeps from somewhere — a scupper,
+   * a deck edge, a fitting — so the sources are a sparse set of points along the
+   * hull and the streak runs DOWN from each.
+   */
   float horiz = mix(P.z, P.x, abs(N.x));
-  float streak = smoothstep(0.66, 0.99, shFbm(vec2(horiz * 7.0 + uSurfSeed * 40.0, P.y * 0.11)));
-  float dripAge = smoothstep(0.0, 6.0, max(0.0, P.y));
-  float rust = streak * sideness * (1.0 - dripAge * 0.6) * 0.30;
-  rust *= smoothstep(0.30, 0.72, shFbm(P.xz * 0.18 + 30.0));
+  /*
+   * Streaks come from POINTS, not from regions.
+   *
+   * The first attempt drew the source term from low-frequency noise in the
+   * horizontal, which put rust in broad zones and produced one continuous dirty
+   * stripe down the length of the hull. What actually happens is that water
+   * stands at a scupper, a deck edge or a fitting and weeps from THAT spot, so
+   * the sources are a sparse set of columns and everything between them is clean
+   * paint. Quantise the horizontal into columns about a metre wide, let roughly a
+   * third of them have a source, and run each one down.
+   */
+  float colW = 1.15;
+  float col = floor(horiz / colW + uSurfSeed * 31.0);
+  float colHas = step(0.66, shHash(vec2(col, 17.0)));
+  // Soft profile across the column so a streak has edges rather than being a bar.
+  float colX = abs(fract(horiz / colW + uSurfSeed * 31.0) - 0.5) * 2.0;
+  float colProf = (1.0 - smoothstep(0.15, 0.95, colX)) * colHas;
+  // Where this column's source sits, and how far below it we are. A streak
+  // starts at its source and fades out over a couple of metres.
+  float srcY = 0.35 + 0.55 * shHash(vec2(col, 41.0));
+  float below = clamp((srcY - Q.y) / 0.55, 0.0, 1.0);
+  float runOut = below * (1.0 - smoothstep(0.55, 1.0, below));
+  // A little break-up along the run so it is not a clean gradient.
+  float mottle = 0.55 + 0.45 * shFbm(vec2(horiz * 3.0, P.y * 0.30 + uSurfSeed * 9.0));
+  float dripAge = below;
+  float rust = colProf * runOut * mottle * sideness * 1.05;
+  // Heavier aft, where the uptake acid and the boat davits are.
+  rust *= mix(0.80, 1.25, aft);
+
+  /*
+   * Funnel soot, fanning aft.
+   *
+   * Everything abaft and above the uptakes is greyed by exhaust — the mack, the
+   * after deckhouse, the top of the hangar. It is a wide soft plume, not a
+   * stain, so it is low-frequency noise biased aft and upward, and it DARKENS
+   * and desaturates rather than colouring.
+   */
+  float sootZone = smoothstep(0.05, 0.75, aft) * smoothstep(-0.15, 0.65, Q.y);
+  float soot = sootZone * smoothstep(0.28, 0.66, shFbm(P.xz * 0.10 + 51.0)) * 0.30;
+  soot *= 0.45 + 0.55 * up;                    // settles on horizontal faces
+
+  /*
+   * Touch-up paint. A ship at sea is patched by hand between deployments and the
+   * patches never quite match — a slightly different grey in irregular blocks a
+   * few metres across, which is most of what breaks up a real hull side.
+   */
+  // NB: the name patch is RESERVED in GLSL ES. Do not call it that.
+  float touchUp = shFbm(P.xz * 0.09 + uSurfSeed * 71.0 + 90.0);
+  float patchAmt = (smoothstep(0.46, 0.60, touchUp) - smoothstep(0.62, 0.78, touchUp));
+  float patchTone = (shHash(floor(P.xz * 0.09 + 90.0)) - 0.5) * 0.14;
 
   // ── non-skid: everything you can walk on is dark, matte and worn ─────────
   float nonskid = smoothstep(0.72, 0.93, up) * uSurfHull;
@@ -880,15 +1000,31 @@ float shSeam(float x, float period, float width) {
   // misaligned with. They come back at reduced strength; the structural detail
   // stays gated.
   float gen = 1.0 - uSurfBaked;
-  float genStain = mix(0.45, 1.0, gen);
+  // Weathering survives on baked assets at close to full strength. The bakes do
+  // not carry any, and 0.45 was quiet enough that it may as well have been zero.
+  float genStain = mix(0.82, 1.0, gen);
   seams *= gen; nonskid *= gen;
-  rust *= genStain; salt *= genStain;
+  rust *= genStain; salt *= genStain; soot *= genStain;
+  patchAmt *= genStain;
   grime = mix(0.72, grime, max(gen, 0.55));
   c *= 1.0 - seams * 0.14;
   c *= 1.0 + plateTone;
   c *= mix(1.0, 0.96 + grime * 0.07, uSurfHull);
-  c += vec3(salt);
-  c = mix(c, vec3(0.34, 0.20, 0.13), rust * uSurfHull);
+  // Touch-up paint first: it is paint, so everything else weathers ON TOP of it.
+  c *= 1.0 + patchTone * patchAmt * uSurfHull;
+  // Salt is a bloom ON the paint, not light added to it. Written as an addition
+  // it lifted a 0.25 albedo by a third and took the hull's median from the
+  // calibrated 150 to 164, undoing two rounds of light-budget work by the back
+  // door. Mix toward a pale, slightly cool film instead, so it can lighten a
+  // surface without ever making it brighter than the film itself.
+  c = mix(c, vec3(0.62, 0.63, 0.65), clamp(salt * 2.2, 0.0, 0.30));
+  // Rust is the one warm thing on a grey ship. Two tones, because a fresh weep is
+  // orange and an old one has gone brown and been rained on.
+  vec3 rustCol = mix(vec3(0.42, 0.20, 0.10), vec3(0.28, 0.18, 0.14), dripAge);
+  c = mix(c, rustCol, clamp(rust, 0.0, 0.85) * uSurfHull);
+  // Soot darkens and desaturates; it does not tint.
+  float sootLum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  c = mix(c, mix(vec3(sootLum), vec3(0.13, 0.13, 0.14), 0.45), clamp(soot, 0.0, 0.6));
   c = mix(c, c * vec3(0.58, 0.60, 0.63), nonskid * (0.70 - traffic * 0.24));
 
   // Soaked band above the waterline: darker, glossier, a little green.
@@ -902,6 +1038,9 @@ float shSeam(float x, float period, float width) {
   c *= mix(1.0, 0.68, wet);
   c = mix(c, c * vec3(0.88, 1.0, 0.95), wet * 0.5);
 
+  gRust = clamp(rust, 0.0, 0.85);
+  gSoot = clamp(soot, 0.0, 0.6);
+  gSalt = clamp(salt * 3.0, 0.0, 0.5);
   diffuseColor.rgb = c;
 }`)
           .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -914,6 +1053,13 @@ float shSeam(float x, float period, float width) {
   float rough = roughnessFactor;
   rough += shFbm(P.xz * 1.1 + 3.0) * 0.14 - 0.06;
   rough = mix(rough, 0.93, smoothstep(0.72, 0.93, up) * uSurfHull);
+  // Weathering is not just a colour. Corrosion product is powdery and soot is
+  // matte, so both scatter where the paint around them reflects — which is what
+  // makes a streak read as a streak in raking light rather than as a decal.
+  rough = mix(rough, 0.90, gRust * 0.75);
+  rough = mix(rough, 0.86, gSoot);
+  // Salt is a fine dry bloom; it dulls a little.
+  rough = mix(rough, 0.80, gSalt);
   float wet2 = (1.0 - smoothstep(0.0, 2.9, P.y)) * smoothstep(-1.3, -0.15, P.y);
   rough = mix(rough, 0.09, wet2);
   roughnessFactor = clamp(rough, 0.04, 1.0);
