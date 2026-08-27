@@ -407,7 +407,12 @@ export class Explosion {
       // rather than a flat cluster.
       // More, denser puffs so a big hit reads as thick billowing smoke, not a thin
       // wispy trail (judge finding). Darker sooty base.
-      const smokeCount = Math.round(THREE.MathUtils.clamp(4 + scale * 4.0, 4, 18));
+      // A warship hit throws a column tens of metres across and a hundred or
+      // more tall, and it stands for minutes. The previous numbers produced a
+      // fifteen-metre-wide wisp reaching twenty-five metres, which at any normal
+      // viewing range is a smudge — an art review recorded "zero explosion
+      // smoke" from eight detonations.
+      const smokeCount = Math.round(THREE.MathUtils.clamp(7 + scale * 7.0, 7, 28));
       const baseCol = new THREE.Color(0x16140f);
       const topCol = new THREE.Color(0x615d54);
       for (let i = 0; i < smokeCount; i++) {
@@ -419,11 +424,12 @@ export class Explosion {
         const spr = new THREE.Sprite(mat);
         const spread = (1 - t * 0.55); // column narrows toward the top
         spr.userData.offset = new THREE.Vector3(
-          (Math.random() - 0.5) * 5 * scale * spread,
-          t * 7 * scale,
-          (Math.random() - 0.5) * 5 * scale * spread,
+          (Math.random() - 0.5) * 11 * scale * spread,
+          t * 14 * scale,
+          (Math.random() - 0.5) * 11 * scale * spread,
         );
-        spr.userData.rise = 2.4 + Math.random() * 2.2 + t * 1.6;
+        // Hot gas rises fast and the top of the column outruns the base.
+        spr.userData.rise = 5.0 + Math.random() * 4.0 + t * 4.5;
         spr.userData.drift = new THREE.Vector3((Math.random() - 0.5) * 1.6, 0, (Math.random() - 0.5) * 1.6);
         spr.userData.delay = t * 0.25; // upper puffs bloom slightly later
         this.smokeGroup.add(spr);
@@ -540,9 +546,12 @@ export class Explosion {
           o.offset.y + o.rise * this.age,
           o.offset.z + o.drift.z * this.age
         );
-        const sc = THREE.MathUtils.lerp(2.0, 12, pt) * this.scale;
+        // Puffs EXPAND as they rise and thin — that expansion is most of what
+        // reads as smoke rather than a sprite.
+        const sc = THREE.MathUtils.lerp(4.0, 30.0, pt) * this.scale;
         sprite.scale.setScalar(sc);
-        mat.opacity = Math.sin(pt * Math.PI) * 0.78;
+        // Hold opacity through the middle of the life instead of peaking once.
+        mat.opacity = Math.min(1, Math.sin(pt * Math.PI) * 1.6) * 0.82;
       }
     }
 
