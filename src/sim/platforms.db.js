@@ -150,7 +150,7 @@ export const PLATFORMS = {
     accelTime: 40, turnRate: 0.05,
     hp: 22, crew: 9, endurance: 8 * 3600,
     sensors: [
-      radar({ id: 'APY10', name: 'AN/APY-10 surface search', height: 0, refRange: 300000, refAir: 120000, emitPower: 0.7, domains: [S, M] }),
+      radar({ id: 'APY10', name: 'AN/APY-10 surface search', height: 0, refRange: 300000, refAir: 120000, emitPower: 0.7, domains: [S, M], isar: true }),
       esm({ id: 'ALQ240', name: 'ALQ-240 ESM', height: 0, sensitivity: 1.3, domains: [S, A, M] }),
       eo({ id: 'MX20', name: 'MX-20HD electro-optical turret', height: 0, refRange: 40000, domains: [S], identifies: true }),
       { type: 'MAD', id: 'MAD', mode: 'PASSIVE', emits: false, scan: 1, refRange: 1200, domains: [U] },
@@ -174,7 +174,7 @@ export const PLATFORMS = {
     accelTime: 45, turnRate: 0.06,
     hp: 18, crew: 5, endurance: 5 * 3600,
     sensors: [
-      radar({ id: 'APY9', name: 'AN/APY-9 UHF rotodome', height: 0, refRange: 300000, refAir: 460000, emitPower: 0.95, domains: [S, A, M], airPriority: true }),
+      radar({ id: 'APY9', name: 'AN/APY-9 UHF rotodome', height: 0, refRange: 300000, refAir: 460000, emitPower: 0.95, domains: [S, A, M], airPriority: true, isar: true }),
       esm({ id: 'ALQ217', name: 'ALQ-217 ESM', height: 0, sensitivity: 1.2, domains: [S, A, M] }),
     ],
     weapons: [],
@@ -192,7 +192,7 @@ export const PLATFORMS = {
     accelTime: 20, turnRate: 0.28,
     hp: 8, crew: 4, endurance: 3.2 * 3600,
     sensors: [
-      radar({ id: 'APS153', name: 'AN/APS-153 MMR', height: 0, refRange: 90000, emitPower: 0.3, domains: [S, M] }),
+      radar({ id: 'APS153', name: 'AN/APS-153 MMR', height: 0, refRange: 90000, emitPower: 0.3, domains: [S, M], isar: true }),
       esm({ id: 'ALQ210', name: 'ALQ-210 ESM', height: 0, sensitivity: 0.9, domains: [S, A] }),
       sonar({ id: 'ALFS', name: 'AN/AQS-22 dipping sonar', mode: 'DUAL', passiveRange: 12000, activeRange: 16000, emitPower: 1.0, domains: [U], dipping: true }),
       eo({ id: 'FLIR', name: 'AN/AAS-44 FLIR', height: 0, refRange: 22000, domains: [S], identifies: true }),
@@ -307,7 +307,7 @@ export const PLATFORMS = {
     accelTime: 60, turnRate: 0.035,
     hp: 30, crew: 11, endurance: 12 * 3600,
     sensors: [
-      radar({ id: 'KORNM', name: 'Korshun-N search radar', height: 0, refRange: 340000, refAir: 90000, emitPower: 1.1, domains: [S, M], fingerprint: 'KORSHUN-N' }),
+      radar({ id: 'KORNM', name: 'Korshun-N search radar', height: 0, refRange: 340000, refAir: 90000, emitPower: 1.1, domains: [S, M], fingerprint: 'KORSHUN-N', isar: true }),
       esm({ id: 'BEARESM', name: 'ESM/ELINT suite', height: 0, sensitivity: 1.25, domains: [S, A, M] }),
       eo({ id: 'BEAREO', name: 'Observation blisters', height: 0, refRange: 30000, domains: [S], identifies: true }),
     ],

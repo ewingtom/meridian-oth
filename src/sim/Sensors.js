@@ -211,17 +211,45 @@ export class SensorSystem {
     if (trk.contributors.size === 0 && trk.sigma > 20000) trk.seedPosition(mx, mz, sigma, 0, 0, 14);
     else trk.updatePosition(mx, mz, sigma);
     trk.alt = t.alt;
-    this._classifyRadar(trk, t, isWeapon, rcs);
+    this._classifyRadar(trk, t, isWeapon, rcs, s, range, rmax);
     this._contribute(trk, u, now, 'RADAR');
   }
 
-  _classifyRadar(trk, t, isWeapon, rcs) {
+  _classifyRadar(trk, t, isWeapon, rcs, s, range, rmax) {
     if (isWeapon) { trk.classification = 'MISSILE'; trk.identity = IDENT.HOSTILE; trk.domain = DOMAIN.MISSILE; return; }
     if (trk.identityLocked) return;
     if (t.isAir) { trk.classification = trk.classification === 'UNKNOWN' ? 'AIR CONTACT' : trk.classification; return; }
     if (trk.classification === 'UNKNOWN' || trk.classification === 'SURFACE CONTACT') {
       trk.classification = rcs > 9000 ? 'LARGE SURFACE CONTACT'
         : rcs > 1500 ? 'SURFACE CONTACT' : 'SMALL SURFACE CONTACT';
+    }
+
+    /*
+     * ISAR — what a maritime patrol radar is actually for.
+     *
+     * Identification used to require eyes-on, full stop, which made the P-8 and
+     * the E-2D nearly useless for the one job a scout exists to do: telling you
+     * whether the thing forty miles ahead is a freighter or a destroyer. The
+     * player was left flying a helicopter to within twenty-two kilometres of
+     * every contact on the plot.
+     *
+     * A real maritime search radar images a ship's profile using its own roll
+     * and pitch to synthesise an aperture, and reads the hull and superstructure
+     * off it — hull length, mast count, where the blocks sit. That is a HULL
+     * TYPE at long range, and it is genuinely different from an identity: it
+     * tells you what kind of ship, not whose. A merchant hull with a military
+     * fit still images as a merchant.
+     *
+     * So this narrows the classification and never touches identity. To learn
+     * whose it is you still have to look at it.
+     */
+    if (s?.isar && range < rmax * 0.6 && !trk.visualId) {
+      const warship = !t.neutral && (t.cls.weapons || []).length > 0;
+      trk.classification = warship
+        ? `WARSHIP — ${t.cls.type || 'COMBATANT'} PROFILE (ISAR)`
+        : 'MERCHANT HULL (ISAR)';
+      if (trk.identity === IDENT.PENDING) trk.identity = IDENT.UNKNOWN;
+      trk.isarProfile = true;
     }
   }
 

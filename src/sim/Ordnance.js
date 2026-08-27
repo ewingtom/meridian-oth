@@ -356,9 +356,45 @@ export class OrdnanceSystem {
       // is hard because there is no time; a low-observable airframe is hard
       // because the fire-control solution keeps breaking. All three are penalties
       // on the same number.
+      /*
+       * Terminal penalties, recalibrated against the modern combat record.
+       *
+       * These were set as though the interceptor were a 1982 Sea Dart, which
+       * managed 8 kills from 26 launches in the Falklands — about 31 percent —
+       * and which could not engage a low-level target at all. That is a system
+       * limitation of that era, not a probability penalty that belongs on a
+       * weapon built specifically to defeat sea-skimmers.
+       *
+       * The best modern dataset is the Red Sea, October 2023 onward: the US Navy
+       * engaged more than 400 drones, cruise missiles and anti-ship ballistic
+       * missiles, expending 120 SM-2, 80 SM-6 and 20 ESSM/SM-3, at a stated rate
+       * of "about two rounds per incoming missile", and no warship was hit. Two
+       * rounds to near-certainty implies a single-shot probability around 0.83:
+       *   1 - (1 - p)^2 = 0.97  ->  p = 0.83
+       * The base numbers in weapons.db were already in that region. The
+       * modifiers were not — stacked, they took an ESSM's 0.80 down to 0.40,
+       * which is a worse result than the campaign actually produced against
+       * targets of exactly this kind.
+       *
+       * So the two that modern seekers were designed to solve come up, and the
+       * one that is still genuinely a discrimination problem stays where it is:
+       *
+       *   low altitude   0.74 -> 0.88   ESSM Block 2 and RAM carry active
+       *                                 seekers for precisely this case
+       *   supersonic     0.68 -> 0.80   anti-ship BALLISTIC missiles, far faster
+       *                                 than this threshold, were intercepted
+       *                                 repeatedly in the Red Sea
+       *   low-observable    unchanged   the fire-control solution still breaks;
+       *                                 nothing in the record says otherwise
+       *
+       * Worst case is now a supersonic sea-skimmer against ESSM at 0.80 x 0.88 x
+       * 0.80 = 0.56, and the doctrinal second round takes that to 0.81. Leakers
+       * still get through a saturation raid, which is the point — they just no
+       * longer get through a two-missile raid.
+       */
       let pk = def.pkSingle ?? 0.65;
-      if (tAlt < 20) pk *= 0.74;
-      if ((t.def?.terminalSpeed || 0) > 700) pk *= 0.68;
+      if (tAlt < 20) pk *= 0.88;
+      if ((t.def?.terminalSpeed || 0) > 700) pk *= 0.80;
       if (t.def?.stealth !== undefined) pk *= clamp(t.def.stealth * 0.8 + 0.34, 0.44, 1.0);
       o.kill('INTERCEPT');
       if (rng.next() < pk) {

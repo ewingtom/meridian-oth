@@ -173,7 +173,17 @@ export class DefenseSystem {
       // same rate gives it a 7% chance of being stopped, which is the honest
       // answer and the reason nobody plans to defeat one with a gun.
       const fast = (o.def.terminalSpeed || o.def.speed) > 600 ? 0.45 : 1;
-      const rate = (mounts.pkSingle || 0.5) * 0.14 * fast * (1 - u.damage.weapons * 0.7);
+      // 0.14 -> 0.20. A Phalanx engagement expends about 300 rounds at 75 per
+      // second — roughly four seconds of fire inside a window that is measured in
+      // seconds either way — and the system has been successful in test against
+      // subsonic targets. It has never shot down a missile in combat, so this
+      // stays short of the manufacturer's figure, but 47 percent for a subsonic
+      // skimmer was pricing in a combat failure rate the tests do not support.
+      // At 0.20 one mount takes a subsonic skimmer to about 60 percent over its
+      // eight-second crossing, and a Mach 2.5 diver to about 10 percent over its
+      // two — the second number is the honest one and the reason nobody plans to
+      // defeat a supersonic diver with a gun.
+      const rate = (mounts.pkSingle || 0.5) * 0.20 * fast * (1 - u.damage.weapons * 0.7);
       const p = 1 - Math.pow(1 - rate, dt);
       if (rng.next() < p) {
         o.kill('CIWS');
