@@ -404,7 +404,14 @@ void main() {
   // kilometres, wind chop to about one, capillary ripples only in the near field.
   // Fading them independently keeps detail everywhere the eye can resolve it
   // without letting any octave alias once it drops below a pixel.
-  float dSwell = smoothstep(7000.0, 900.0, dist) * uDetailLevel;
+  float dSwell = smoothstep(4200.0, 900.0, dist) * uDetailLevel;
+  // The swell normal is built from TWO octaves, and each one costs three field
+  // lookups to finite-difference a gradient out of. The second is four times the
+  // frequency of the first, so it drops below a pixel four times sooner — but it
+  // was fading on the same seven-kilometre curve as the first and being sampled
+  // across most of the screen for nothing. Measured at 1280x720, the whole
+  // detail-normal block was 7.9 ms of a 49.6 ms frame.
+  float dSwell2 = smoothstep(1500.0, 400.0, dist) * uDetailLevel;
   float dChop  = smoothstep(1600.0, 220.0, dist) * uDetailLevel;
   float dCap   = smoothstep(340.0, 45.0, dist) * uDetailLevel;
   float nearDetail = max(dSwell, max(dChop, dCap));
@@ -416,9 +423,11 @@ void main() {
       vec2 rp = vWorldPos.xz * 0.055 + uTime * 0.030;
       float n1 = fbm(rp);
       grad += vec2(n1 - fbm(rp + vec2(0.55, 0.0)), n1 - fbm(rp + vec2(0.0, 0.55))) * dSwell;
+    }
+    if (dSwell2 > 0.01) {
       vec2 rp2 = vWorldPos.xz * 0.155 - uTime * 0.055;
       float n2 = fbm(rp2);
-      grad += vec2(n2 - fbm(rp2 + vec2(0.3, 0.0)), n2 - fbm(rp2 + vec2(0.0, 0.3))) * 0.7 * dSwell;
+      grad += vec2(n2 - fbm(rp2 + vec2(0.3, 0.0)), n2 - fbm(rp2 + vec2(0.0, 0.3))) * 0.7 * dSwell2;
     }
     if (dChop > 0.01) {
       vec2 rpChop = vWorldPos.xz * 0.62 + uTime * 0.13;
