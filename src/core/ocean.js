@@ -878,6 +878,20 @@ void main() {
       float bowV = smoothstep(beam * 0.75, 0.0, vLine)
         * smoothstep(0.0, beam * 0.8, fromStem)
         * exp(-max(0.0, fromStem) * 0.0055);
+      /*
+       * The water INSIDE the V is a sheet, not clean sea between two hairlines.
+       *
+       * bowV draws the two crest arms and nothing else, so a ship at speed had a
+       * pair of thin bright lines leaving the stem with undisturbed water between
+       * them — described by a review as a thin line where there should be a
+       * foaming wedge. What a bow actually leaves is a continuous sheet of
+       * aerated water filling the wedge close in, which closes up and dies well
+       * before the arms have finished running aft.
+       */
+      float armHalf = max(0.0, fromStem) * 0.36 + beam * 0.55;
+      float bowSheet = (1.0 - smoothstep(armHalf * 0.35, armHalf, side))
+        * smoothstep(-4.0, beam * 0.7, fromStem)
+        * exp(-max(0.0, fromStem) * 0.016);
       // The mound of white water piled against the stem itself.
       float stemPile = smoothstep(beam * 1.7, beam * 0.1, side)
         * smoothstep(-10.0, 12.0, fromStem) * smoothstep(74.0, 8.0, fromStem);
@@ -889,7 +903,8 @@ void main() {
       float sideChurn = smoothstep(beam * 0.6, beam * 1.15, side)
         * smoothstep(beam * 2.1, beam * 0.95, side)
         * smoothstep(halfLen * 1.1, halfLen * 0.45, abs(along));
-      float near = bowV * 1.0 + stemPile * 0.8 + boil * 1.1 + sideChurn * 0.5;
+      float near = bowV * 1.0 + bowSheet * 0.85 + stemPile * 0.9
+                 + boil * 1.1 + sideChurn * 0.5;
       near *= spd * (0.5 + 0.5 * (lace * 0.55 + streak * 0.55));
       bowFoam = max(bowFoam, near);
 
