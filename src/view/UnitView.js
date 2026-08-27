@@ -303,6 +303,46 @@ function _calibratePaint(c, name) {
   c.color.multiplyScalar(PAINT_ALBEDO_GAIN);
 }
 
+/*
+ * A contrail is soft at the edges. A wake is not.
+ *
+ * The contrail ribbon was borrowing the wake foam texture, which is opaque and
+ * hard-edged because that is what churned water looks like. Stretched across a
+ * 170-metre-wide billboard ribbon at 0.85 opacity, each segment read as exactly
+ * what an art review called it: a hard-edged translucent polygon slab.
+ *
+ * What it needs is a gaussian ACROSS the ribbon and near-uniform along it, so
+ * the quad edges dissolve and only the line remains. Built once, shared.
+ */
+let _contrailTex = null;
+function getContrailTexture() {
+  if (_contrailTex) return _contrailTex;
+  const H = 64, W = 8;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const cx = cv.getContext('2d');
+  const img = cx.createImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    // Gaussian across the width, with a slightly denser core.
+    const t = (y / (H - 1)) * 2 - 1;              // -1..1 across the ribbon
+    const g = Math.exp(-t * t * 3.2);
+    const core = Math.exp(-t * t * 14.0) * 0.45;
+    const a = Math.min(1, g * 0.72 + core);
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      img.data[i] = 255; img.data[i + 1] = 255; img.data[i + 2] = 255;
+      img.data[i + 3] = Math.round(a * 255);
+    }
+  }
+  cx.putImageData(img, 0, 0);
+  _contrailTex = new THREE.CanvasTexture(cv);
+  _contrailTex.wrapS = THREE.RepeatWrapping;
+  _contrailTex.wrapT = THREE.ClampToEdgeWrapping;
+  _contrailTex.minFilter = THREE.LinearFilter;
+  _contrailTex.magFilter = THREE.LinearFilter;
+  return _contrailTex;
+}
+
 export class UnitView {
   constructor(scene, unit, opts = {}) {
     this.scene = scene;
@@ -837,8 +877,27 @@ float shSeam(float x, float period, float width) {
   float traffic = smoothstep(0.4, 0.75, shFbm(P.xz * 0.7 + 60.0));
 
   vec3 c = diffuseColor.rgb;
-  float gen = 1.0 - uSurfBaked;      // generated detail is off on baked assets
-  seams *= gen; rust *= gen; nonskid *= gen; salt *= gen; grime = mix(0.5, grime, gen);
+  // Which generated detail survives on a BAKED asset.
+  //
+  // The blanket rule used to be "none of it", on the reasoning that a properly
+  // textured hull already has its plating and non-skid in the map and drawing
+  // them again gives a double image. That reasoning holds for the STRUCTURAL
+  // detail — seams follow real plate lines and non-skid follows real walkways,
+  // and a procedural guess at either lands next to the baked one rather than on
+  // it. It does not hold for WEATHERING, which the bakes turn out not to carry
+  // at all: an art review found zero weathering on any textured asset in the
+  // game, and a warship at sea is streaked with rust weeping from every scupper
+  // and hazed with salt from the boot topping up.
+  //
+  // Rust and salt are also the two that cannot double-image, because they are
+  // stains rather than structure — there is nothing underneath for them to be
+  // misaligned with. They come back at reduced strength; the structural detail
+  // stays gated.
+  float gen = 1.0 - uSurfBaked;
+  float genStain = mix(0.45, 1.0, gen);
+  seams *= gen; nonskid *= gen;
+  rust *= genStain; salt *= genStain;
+  grime = mix(0.72, grime, max(gen, 0.55));
   c *= 1.0 - seams * 0.14;
   c *= 1.0 + plateTone;
   c *= mix(1.0, 0.96 + grime * 0.07, uSurfHull);
@@ -897,7 +956,7 @@ float shSeam(float x, float period, float width) {
     const u = this.unit;
     if (u.cls.helo) return;
     let map = null;
-    try { map = getSharedWakeFoamTexture(); } catch (e) { /* optional */ }
+    try { map = getContrailTexture(); } catch (e) { /* optional */ }
     if (!map) return;
     this.contrail = new TrailRibbon(scene, {
       capacity: 90, life: 220, color: 0xf2f6fa, map,
@@ -905,7 +964,7 @@ float shSeam(float x, float period, float width) {
       // compression it covers a great deal more, so the restart threshold has to
       // be generous or the trail resets itself every frame.
       maxGap: 26000,
-      orientation: 'billboard', uvRepeat: 14, renderOrder: 3, opacity: 0.85,
+      orientation: 'billboard', uvRepeat: 1, renderOrder: 3, opacity: 0.55,
       widthFn: (age, life, uu) => 22 + (1 - uu) * 150,
       alphaFn: (age, life, uu) => {
         // uu = 0 at the oldest sample, 1 at the aircraft. A contrail takes a
