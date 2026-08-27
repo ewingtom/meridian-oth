@@ -275,6 +275,17 @@ class Game {
       e.preventDefault();
       const hit = this.overlay.pick(e.clientX, e.clientY);
 
+      // A round in flight: ride it. This is the single best-looking thing the
+      // game does, and until now the only way to reach it was to know that V was
+      // the key for it. Double-clicking the thing you want to watch is what
+      // everyone tries first.
+      if (hit?.ord && hit.ord.alive) {
+        if (this.cam.rideMissile(hit.ord)) {
+          this.autoMissileCam = false;   // an explicit choice outranks the director
+          this.audio.ui('confirm');
+          return;
+        }
+      }
       // A unit we own: chase it, exactly as the roster does.
       if (hit?.unit && hit.unit.alive) {
         this.selectUnit(hit.unit, false);
@@ -386,8 +397,30 @@ class Game {
     }
     if (k === 'Space') { e.preventDefault(); this.setTimeScale(this.timeScale === 0 ? this.lastScale || 4 : 0); return; }
     if (k === 'KeyM') {
-      // Snap between the chart and the sea.
-      this.cam.distTarget = this.cam.dist > 30000 ? 3000 : 90000;
+      // Three stops: the sea, the chart, and the whole theatre.
+      //
+      // The theatre stop frames every unit the player actually holds — their own
+      // force plus every live contact — so "show me everything" is one key rather
+      // than scrolling the plot around with the arrows trying to find the edges
+      // of a fight that is six hundred kilometres across.
+      const d = this.cam.dist;
+      if (d < 30000) {
+        this.cam.distTarget = 90000;
+      } else if (d < 200000) {
+        const pts = [];
+        for (const u of this.world.units) {
+          if (!u.alive || u.despawned) continue;
+          if (u.side === SIDE.BLUE) pts.push({ x: u.x, z: u.z });
+        }
+        const table = this.world.picture(SIDE.BLUE);
+        if (table) for (const t of table.list) if (!t.faded) pts.push({ x: t.x, z: t.z });
+        const obj = this.world.scenario?.objectivePoint;
+        if (obj) pts.push({ x: obj.x, z: obj.z });
+        this.cam.frameAll(pts);
+        this.hud.pushAlert('THEATRE VIEW', 'info', 1.8);
+      } else {
+        this.cam.distTarget = 3000;
+      }
       return;
     }
     if (k === 'KeyF') {
@@ -751,13 +784,13 @@ class Game {
       <h3>CAMERA</h3>
       <div class="legend">
         <div><b>Left-drag</b> pan the plot</div><div><b>Wheel</b> zoom · sea level to 260 km</div>
-        <div><b>Right-drag</b> orbit</div><div><b>Arrows</b> pan · <b>M</b> chart / sea</div>
+        <div><b>Right-drag</b> orbit</div><div><b>M</b> cycle sea → chart → whole theatre</div>
         <div><b>F</b> follow selected unit</div><div><b>B</b> take the bridge (ships only)</div>
         <div><b>V</b> ride a weapon</div><div><b>Tab</b> cycle own units</div>
       </div>
       <h3 style="margin-top:20px">COMMAND</h3>
       <div class="legend">
-        <div><b>Click</b> select unit or contact</div><div><b>Double-click</b> go to it — on the plot or in a panel</div>
+        <div><b>Click</b> select unit or contact</div><div><b>Double-click</b> go to it — ship, contact or missile</div>
         <div><b>Shift + drag</b> box-select several</div><div><b>Double-click sea</b> zoom in there</div>
         <div><b>Right-click sea</b> steer there</div><div><b>Shift + click</b> queue waypoints</div>
         <div><b>1 2 3 4</b> EMCON alpha → delta</div><div><b>E</b> engage designated track</div>

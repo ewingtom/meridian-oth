@@ -25,7 +25,10 @@ export class SkySystem {
     // player can climb to 250 km, and a BackSide box the camera has escaped is
     // simply not there. gl_Position.z is forced to w in the shader, so the size
     // costs nothing in depth precision.
-    this.sky.scale.setScalar(2200000);
+    // Big enough that the camera is still inside it at the very top of the zoom
+    // range. A BackSide box the camera has escaped is simply not there, and the
+    // zoom now reaches 1,600 km.
+    this.sky.scale.setScalar(7000000);
     scene.add(this.sky);
 
     this.sunPosition = new THREE.Vector3();

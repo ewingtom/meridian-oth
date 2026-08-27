@@ -959,6 +959,13 @@ export class TacticalOverlay {
       ctx.fillStyle = col; ctx.fill();
       ctx.restore();
 
+      // A round in flight is a thing the player wants to LOOK at, so it has to be
+      // clickable like everything else on the plot. The hit radius is deliberately
+      // generous — a missile symbol is a few pixels of arrowhead crossing the
+      // screen at five hundred knots, and asking for pixel accuracy on that is
+      // asking for a target nobody can hit.
+      this.pickables.push({ x: p.x, y: p.y, r: Math.max(15, s + 10), ord: o, track: null, unit: null });
+
       if (o.category === 'ASM' || o.category === 'TORPEDO') {
         const lead = clamp((o.speed * 120) / mpp, 6, 90);
         ctx.strokeStyle = this._alpha(col, 0.7);

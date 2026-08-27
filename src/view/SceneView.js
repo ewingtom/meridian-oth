@@ -609,12 +609,26 @@ export class SceneView {
     // Atmospheric extinction, tied to the meteorological visual range the weather
     // system is reporting rather than to an arbitrary art number — the same figure
     // the lookout would give you in miles.
-    const vis = this.world.weather.visFactor * 46000;
-    this.ocean.setVisibility(vis);
+    // FALLBACK ONLY.
+    //
+    // This ran unconditionally, a hundred and sixty lines after the weather block
+    // had already set the real visibility from weatherSys.state.visNm — so it
+    // overwrote it every single frame with a coarse value derived from a
+    // clamped factor. The measured result was 58,979 m of visibility in a gale
+    // that the sim itself was reporting as 6,482 m: the game ran permanently
+    // clearer than its own CLEAR regime, and no weather state could ever close
+    // the horizon down. Only reach for this when there is no weather system to
+    // ask.
+    if (!this.world.weatherSys) {
+      this.ocean.setVisibility(this.world.weather.visFactor * 46000);
+    }
     // uFogDensity is only used by the legacy near-field paths now; the actual
     // aerial perspective is integrated through an exponential atmosphere in the
     // shaders (see opticalDepth), which is what keeps the tactical view from
     // altitude legible instead of a flat white wash.
+    // Read back whatever visibility actually ended up on the shader, rather than
+    // recomputing it from the fallback that no longer runs.
+    const vis = Math.max(1200, this.ocean.uniforms.uVisibility.value);
     this.ocean.uniforms.uFogDensity.value = clamp(3.912 / vis, 0.000004, 0.0008);
   }
 

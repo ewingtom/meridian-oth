@@ -23,6 +23,9 @@ import { curvatureDrop } from './ocean.js';
 
 const _v3a = new THREE.Vector3();
 
+/** Hard ceiling on camera distance, metres. */
+export const MAX_DIST = 1600000;
+
 export const CAM = {
   TACTICAL: 'TACTICAL',
   FOLLOW: 'FOLLOW',
@@ -197,6 +200,34 @@ export class CameraDirector {
   shake(amount) { this._shake = Math.min(1.6, this._shake + amount); }
 
   // ── input ─────────────────────────────────────────────────────────────────
+  /**
+   * Frame a set of points — the whole force, or the whole known picture. Used by
+   * the chart/theatre toggle so "show me everything" is one keystroke rather
+   * than a minute of scrolling.
+   */
+  frameAll(points, pad = 1.35) {
+    if (!points || !points.length) return;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const p of points) {
+      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
+    }
+    const cx = (minX + maxX) * 0.5, cz = (minZ + maxZ) * 0.5;
+    const spanX = Math.max(1000, maxX - minX), spanZ = Math.max(1000, maxZ - minZ);
+    // Fit the larger span into the vertical field of view, allowing for the fact
+    // that a pitched camera sees less ground than a plan view would.
+    const aspect = this.camera.aspect || 1.7;
+    const vFov = (this.camera.fov * Math.PI) / 180;
+    const needV = spanZ / (2 * Math.tan(vFov * 0.5));
+    const needH = spanX / (2 * Math.tan(vFov * 0.5) * aspect);
+    this.focusTarget.set(cx, cz);
+    this.distTarget = clamp(Math.max(needV, needH) * pad, 800, MAX_DIST);
+    this.pitchTarget = 1.30;                       // near plan view
+    if (this.mode === CAM.FOLLOW || this.mode === CAM.BRIDGE) {
+      this.mode = CAM.TACTICAL; this.followUnit = null; this.bridgeUnit = null;
+    }
+  }
+
   zoom(delta) {
     if (this.mode === CAM.BRIDGE) {
       this.fovTarget = clamp(this.fovTarget * (1 + delta * 0.0016), 6, 70);
@@ -204,7 +235,14 @@ export class CameraDirector {
     }
     const f = Math.exp(delta * 0.0013);
     const min = this.mode === CAM.FOLLOW ? 90 : 260;
-    this.distTarget = clamp(this.distTarget * f, min, 300000);
+    // Far enough out to actually SEE THE WHOLE FIGHT.
+    //
+    // The theatre in this scenario spans about 550 by 675 kilometres, and the cap
+    // was 300 km of camera DISTANCE — which at a shallow pitch frames rather less
+    // ground than that. So the one view the game is really about, the whole
+    // engagement at once, was the one view it would not give you: you had to
+    // scroll around with the keys and hold the picture in your head.
+    this.distTarget = clamp(this.distTarget * f, min, MAX_DIST);
     if (this.mode === CAM.FOLLOW && this.distTarget > 12000) { this.mode = CAM.TACTICAL; this.followUnit = null; }
   }
 
@@ -316,7 +354,10 @@ export class CameraDirector {
         : alt;
     const near = this.mode === CAM.BRIDGE ? 0.25
       : clamp(Math.min(alt, subject) * 0.02, 0.25, 900);
-    const far = clamp(alt * 90 + 90000, 90000, 1400000);
+    // The far plane has to reach past the horizon at whatever altitude the zoom
+    // has climbed to, or the sea is clipped away into empty space at the top of
+    // the range.
+    const far = clamp(alt * 90 + 90000, 90000, 6000000);
     this.camera.near = near;
     this.camera.far = far;
     this.camera.updateProjectionMatrix();
