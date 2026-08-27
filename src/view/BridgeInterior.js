@@ -372,6 +372,25 @@ export class BridgeInterior {
     this.chartLamp = new THREE.PointLight(0x4a86c4, 3.0, 6, 2);
     this.chartLamp.position.set(-width * 0.28, -0.3, -0.6);
     this.group.add(this.chartLamp);
+
+    /*
+     * Daylight coming in through the windows.
+     *
+     * The room was lit by its own two instrument lamps and nothing else, and both
+     * correctly dim to almost nothing in daylight — so in daylight the interior
+     * had no light source at all. A review measured 55.3 percent of the bridge
+     * frame below luminance 3: over half the picture crushed to black while the
+     * sea outside the glass sat at 150.
+     *
+     * A wheelhouse in daylight is lit by the sea and sky through a continuous
+     * band of window, which is a large soft source in front of and below the eye.
+     * A hemisphere standing in for it is the cheap, stable way to say that: sky
+     * colour from above, a dimmer bounce off the deck below, and it goes out with
+     * the sun rather than with the instrument lamps.
+     */
+    this.dayFill = new THREE.HemisphereLight(0xa8c4dc, 0x30363c, 0.0);
+    this.dayFill.position.set(0, HEIGHT * 0.5, DEPTH * 0.5);
+    this.group.add(this.dayFill);
   }
 
   /**
@@ -470,6 +489,7 @@ export class BridgeInterior {
    */
   setDaylight(dayFactor) {
     const night = 1 - Math.min(1, Math.max(0, dayFactor));
+    if (this.dayFill) this.dayFill.intensity = 2.6 * Math.min(1, Math.max(0, dayFactor));
     if (this.glow) this.glow.intensity = 0.35 + 6.15 * night;
     if (this.chartLamp) this.chartLamp.intensity = 0.2 + 2.8 * night;
   }
