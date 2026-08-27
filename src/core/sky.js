@@ -148,6 +148,16 @@ export class SkySystem {
     u.uHorizonColor.value.copy(horizonLow).lerp(horizonHigh, t);
     u.uSunColor.value.copy(warm).lerp(white, t);
 
+    // The SUN'S COLOUR has to go out with the sun.
+    //
+    // uSunColor was left at full sunset orange regardless of elevation, and the
+    // sky shader uses it for the sun's glow contribution — so a sun thirty-two
+    // degrees BELOW the horizon still painted a bright orange band right around
+    // the compass. An art review found it burning at two in the morning. The
+    // zenith and horizon colours were already going properly dark, which is why
+    // it read as a permanent sunset under a black sky.
+    u.uSunColor.value.multiplyScalar(this.dayFactor);
+
     // Night. Not black — a clear night sky over open ocean is a deep blue with a
     // slightly lighter band at the horizon, and the eye adapts to it.
     const nightZenith = new THREE.Color(0x02040c);

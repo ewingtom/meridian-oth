@@ -264,6 +264,42 @@ void main() {
       vec3 cirCol = mix(uCloudColorLit * 1.02, uSunColor * 1.25, pow(sd, 3.0) * 0.7);
       sky = mix(sky, cirCol, cirrus * 0.34 * uCloudiness);
 
+      // ── STARS ────────────────────────────────────────────────────────────
+      //
+      // The sun sets now, so night is a state the player actually spends time
+      // in, and an empty black dome is worse than no night at all. An art review
+      // found no stars, no moon, and an orange horizon glow still burning at two
+      // in the morning.
+      //
+      // Stars are drawn from a hashed cell grid on the view direction: one
+      // candidate per cell, thresholded hard so most cells are empty, with a
+      // brightness distribution skewed so a few are much brighter than the rest.
+      // They fade out through twilight rather than switching on, cut off below
+      // the horizon, and thin toward it the way real atmospheric extinction
+      // does. Twinkle is a slow per-star phase, not a per-frame random, so they
+      // shimmer instead of flickering.
+      float night = 1.0 - smoothstep(-0.10, 0.12, uSunDirection.y);
+      if (night > 0.002 && elevation > 0.0) {
+        vec3 sdir = normalize(vWorldPosition);
+        vec2 cell = vec2(atan(sdir.z, sdir.x), asin(clamp(sdir.y, -1.0, 1.0))) * 46.0;
+        vec2 ci = floor(cell);
+        float h1 = fract(sin(dot(ci, vec2(127.1, 311.7))) * 43758.5453);
+        float h2 = fract(sin(dot(ci, vec2(269.5, 183.3))) * 24634.6345);
+        float h3 = fract(sin(dot(ci, vec2(419.2, 371.9))) * 15731.7431);
+        // Only about one cell in twenty-five carries a star.
+        float present = step(0.960, h1);
+        vec2 jitter = vec2(h2, h3) - 0.5;
+        float d = length(fract(cell) - 0.5 - jitter * 0.7);
+        float disc = smoothstep(0.085, 0.0, d);
+        // Magnitude: cubed so the field is mostly faint with a few bright ones.
+        float mag = pow(fract(h1 * 91.7), 3.0);
+        float twinkle = 0.75 + 0.25 * sin(uTime * (1.1 + h2 * 2.2) + h3 * 6.283);
+        // Extinction near the horizon, and never below it.
+        float alt = smoothstep(0.0, 0.28, elevation);
+        vec3 tint = mix(vec3(0.82, 0.87, 1.0), vec3(1.0, 0.93, 0.82), h3);
+        sky += tint * present * disc * (0.18 + mag * 2.4) * twinkle * alt * night;
+      }
+
       vec3 color = sky + sunContribution * (1.0 - cloudA * 0.92);
       // ONE dither, at one LSB, and no more.
       //
