@@ -67,6 +67,9 @@ export class SignalSystem {
     this.log = [];             // everything, newest last
     this.fired = new Set();    // one-shot keys
     this.cooldown = new Map(); // kind -> earliest next fire
+    this.lastFired = new Map();// kind -> when it last fired, for variety
+    this.repeats = new Map();  // kind -> consecutive fires without another kind
+    this.recentUnit = new Map();// `${kind}:${unitId}` -> earliest re-fire
     this._t = 0;
     this.standing = {
       // Theatre-level directives currently in force. The mission scorer reads these.
@@ -122,24 +125,55 @@ export class SignalSystem {
       const sig = gen.check(this, w, now);
       if (!sig) continue;
       this.fired.add(`sched:${beat.kind}`);
+      this.lastFired.set(gen.kind, now);
       this.cooldown.set(gen.kind, now + 1e9);
       this.push(sig);
       return;
     }
 
-    // Walk the generators from a rotating start so a cheap, frequently-eligible
-    // signal near the top of the list cannot starve the expensive ones at the
-    // bottom — the theatre-level orders were never getting a turn.
-    this._rot = ((this._rot || 0) + 1) % GENERATORS.length;
-    for (let i = 0; i < GENERATORS.length; i++) {
-      const gen = GENERATORS[(this._rot + i) % GENERATORS.length];
+    /*
+     * Take the signal that has been silent longest, not the first one ready.
+     *
+     * A rotating start stopped the top of the list starving the bottom, but it
+     * did not stop a generator that is ALWAYS eligible from taking every turn it
+     * came round to. Replenishment is eligible almost continuously — there is an
+     * oiler, and somebody is always the thinnest on fuel — so over a four hour
+     * sortie it took eight of fourteen signals, mostly from the same ship, while
+     * six generators never fired once: no shadower, no neutral CPA, no fishing
+     * fleet, no BDA, no weapons-free release.
+     *
+     * Collecting every eligible generator and picking the one whose kind has
+     * been quiet longest costs one more pass and turns the watch into a varied
+     * one. A kind that has never fired sorts first, so the rare events finally
+     * get their turn.
+     */
+    const ready = [];
+    for (const gen of GENERATORS) {
       if (!this._ready(gen.kind, now, gen.cooldown)) continue;
+      ready.push(gen);
+    }
+    ready.sort((a, b) => (this.lastFired.get(a.kind) ?? -1e9)
+                       - (this.lastFired.get(b.kind) ?? -1e9));
+    for (const gen of ready) {
       const sig = gen.check(this, w, now);
-      if (sig) {
-        this.cooldown.set(gen.kind, now + (gen.cooldown || 600));
-        this.push(sig);
-        return;
+      if (!sig) continue;
+      // Do not ask the same ship the same question twice in a watch. If the
+      // player ignores VANGUARD's fuel state, that is a decision; repeating it
+      // every cooldown turns a decision into nagging.
+      if (sig.unit) {
+        const key = `${gen.kind}:${sig.unit.id}`;
+        if ((this.recentUnit.get(key) ?? -1e9) > now) continue;
+        this.recentUnit.set(key, now + Math.max(gen.cooldown || 600, 45 * MIN));
       }
+      // Each consecutive fire of one kind pushes its own next turn further out.
+      const rep = (this.lastKind === gen.kind ? (this.repeats.get(gen.kind) || 0) + 1 : 0);
+      this.repeats.set(gen.kind, rep);
+      this.lastKind = gen.kind;
+      this.lastFired.set(gen.kind, now);
+      this.cooldown.set(gen.kind,
+        now + (gen.cooldown || 600) * Math.min(3, 1 + 0.6 * rep));
+      this.push(sig);
+      return;
     }
   }
 
@@ -411,7 +445,10 @@ export const GENERATORS = [
 
   // ── civilian distress ────────────────────────────────────────────────────
   {
-    kind: 'DISTRESS', cooldown: 30 * MIN,
+    // A mayday is not a routine event. At a 30-minute floor, and with shipping
+    // now actually on the task group's track, six of them came up in a four-hour
+    // sortie and the thing stopped being an emergency.
+    kind: 'DISTRESS', cooldown: 95 * MIN,
     check(sys, w, now) {
       if (now - w.startedAt < 8 * MIN) return null;
       const n = w.units.find(u => u.alive && u.side === SIDE.NEUTRAL && !u._distress

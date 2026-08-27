@@ -279,10 +279,33 @@ export function buildScenario(seed = 20260825) {
   // great-circle routes between ports, so the neutrals here run on three of
   // them — and one of those lanes passes straight through the intel box, which
   // is precisely why the identification problem is a problem.
+  /*
+   * Lanes have to cross the track the task group is actually going to steam.
+   *
+   * These were laid out against the corners of the area of operations, and the
+   * transit runs from (-20000, -200000) to POINT OSCAR at (30000, 20000): about
+   * 225 km on a course of 013. Measured against that corridor, the nearest
+   * neutral in the whole scenario passed 71 km abeam and most were 160 to 326 km
+   * off. In four hours of steaming the player met no shipping at all.
+   *
+   * Everything downstream depended on it. The signal that fires when a merchant
+   * closes inside the screen needs one within 26 km of a high-value unit; the
+   * fishing-fleet signal needs two contacts in a cone ahead. Neither condition
+   * was ever satisfiable, so five of the twelve generators never fired once in a
+   * four-hour sortie and the sea was empty.
+   *
+   * A task group does not get a private ocean. It transits the lanes that are
+   * there, and having to sort a freighter from a warship at forty miles is the
+   * problem this game is about — so one lane now crosses the corridor early,
+   * another crosses it late, and the third stays out wide as background traffic.
+   */
   const LANES = [
-    { name: 'NORTHERN APPROACH', a: { x: -AO_HALF * 0.92, z: -AO_HALF * 0.35 }, b: { x: AO_HALF * 0.9, z: AO_HALF * 0.1 } },
-    { name: 'KESTREL PASSAGE', a: { x: -AO_HALF * 0.5, z: AO_HALF * 0.88 }, b: { x: AO_HALF * 0.75, z: -AO_HALF * 0.6 } },
-    { name: 'COASTAL', a: { x: AO_HALF * 0.15, z: AO_HALF * 0.5 }, b: { x: AO_HALF * 0.95, z: -AO_HALF * 0.15 } },
+    // Crosses the base course at about (2000, -120000), a third of the way up.
+    { name: 'KESTREL PASSAGE', a: { x: -AO_HALF * 0.62, z: -AO_HALF * 0.52 }, b: { x: AO_HALF * 0.70, z: -AO_HALF * 0.16 } },
+    // Crosses again on the approach to POINT OSCAR, around (22000, -20000).
+    { name: 'NORTHERN APPROACH', a: { x: -AO_HALF * 0.80, z: AO_HALF * 0.02 }, b: { x: AO_HALF * 0.86, z: -AO_HALF * 0.24 } },
+    // Background traffic, well clear to the east.
+    { name: 'COASTAL', a: { x: AO_HALF * 0.42, z: AO_HALF * 0.55 }, b: { x: AO_HALF * 0.95, z: -AO_HALF * 0.30 } },
   ];
   world.lanes = LANES;
   for (let i = 0; i < 12; i++) {
@@ -290,9 +313,15 @@ export function buildScenario(seed = 20260825) {
     let x, z, hdg;
     if (isTrawler) {
       // Fishing works grounds, not routes: a loose cluster over a bank.
-      const bx = 6000, bz = 52000;
-      x = bx + rng.range(-26000, 26000);
-      z = bz + rng.range(-22000, 22000);
+      //
+      // The bank was at (6000, 52000) — past POINT OSCAR, and 250 km up the
+      // track from where the task group starts. Nobody ever saw it. A bank sits
+      // where the bottom brings the fish up, and this one is on the shelf edge
+      // the group crosses about an hour out, which is exactly the kind of place a
+      // warship at twenty knots has to think about gear in the water.
+      const bx = -9000, bz = -152000;
+      x = bx + rng.range(-15000, 15000);
+      z = bz + rng.range(-11000, 11000);
       hdg = rng.range(0, 360) * D2R;
     } else {
       const lane = LANES[i % LANES.length];
