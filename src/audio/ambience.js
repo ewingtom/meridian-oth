@@ -38,13 +38,24 @@ export function startOceanAmbience(engine, opts = {}) {
   const swell = createLFO(ctx, bedFilter.frequency, { frequency: 0.07, depth: 220, center: 500 });
   swell.osc.start(t0);
 
-  // --- Foam / spray hiss layer ---
+  /*
+   * Foam / spray hiss — sat at 3500 Hz, which is the worst possible place.
+   *
+   * Raw levels are misleading here. This layer measured about 20 dB BELOW the
+   * swell bed under it, so on a spectrum it looked negligible — but 3.5 kHz is
+   * the bottom of the ear's sensitivity curve, some 30-40 dB more sensitive than
+   * the 60-80 Hz where the swell lives. The result was a mix whose only audible
+   * component was hiss: reported as "just an ambient hissing, nothing else".
+   *
+   * Sea heard from a ship's height is mostly the swell. The spray content is
+   * real but it belongs well down and much lower in the spectrum than this.
+   */
   const hissFilter = ctx.createBiquadFilter();
   hissFilter.type = "bandpass";
-  hissFilter.frequency.value = 3500;
-  hissFilter.Q.value = 0.6;
+  hissFilter.frequency.value = 1400;
+  hissFilter.Q.value = 0.5;
   const hissGain = ctx.createGain();
-  hissGain.gain.value = 0.1;
+  hissGain.gain.value = 0.012;
   const hissSrc = ctx.createBufferSource();
   hissSrc.buffer = engine._buffers.white;
   hissSrc.loop = true;
@@ -56,7 +67,9 @@ export function startOceanAmbience(engine, opts = {}) {
     intensity = v;
     const now = ctx.currentTime;
     bedGain.gain.setTargetAtTime(lerp(0.3, 0.9, v), now, 0.5);
-    hissGain.gain.setTargetAtTime(lerp(0.04, 0.3, v), now, 0.5);
+    // Was lerp(0.04, 0.3). See the note where this filter is built: at 3.5 kHz
+    // and this level it was the only thing anyone could hear.
+    hissGain.gain.setTargetAtTime(lerp(0.005, 0.045, v), now, 0.5);
     swell.depthGain.gain.setTargetAtTime(lerp(150, 400, v), now, 0.5);
   }
   applyIntensity(intensity);
@@ -241,13 +254,15 @@ export function startWind(engine, intensityFraction = 0.3) {
   highpass.type = "highpass";
   highpass.frequency.value = 150;
 
+  // Wind is the other broadband source sitting in the ear's most sensitive
+  // octaves. Brought down and darkened for the same reason as the sea hiss.
   const filter = ctx.createBiquadFilter();
   filter.type = "bandpass";
-  filter.frequency.value = lerp(500, 2200, intensityFraction);
+  filter.frequency.value = lerp(320, 1100, intensityFraction);
   filter.Q.value = 0.6;
 
   const windGain = ctx.createGain();
-  windGain.gain.value = lerp(0.15, 0.55, intensityFraction);
+  windGain.gain.value = lerp(0.04, 0.16, intensityFraction);
 
   const src = ctx.createBufferSource();
   src.buffer = engine._buffers.white;
@@ -262,8 +277,8 @@ export function startWind(engine, intensityFraction = 0.3) {
 
   function applyIntensity(v) {
     const now = ctx.currentTime;
-    filter.frequency.setTargetAtTime(lerp(500, 2200, v), now, 0.6);
-    windGain.gain.setTargetAtTime(lerp(0.15, 0.55, v), now, 0.6);
+    filter.frequency.setTargetAtTime(lerp(320, 1100, v), now, 0.6);
+    windGain.gain.setTargetAtTime(lerp(0.04, 0.16, v), now, 0.6);
   }
   applyIntensity(intensityFraction);
 
