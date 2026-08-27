@@ -169,7 +169,24 @@ export class SkySystem {
 
   updateEnvMap() {
     if (this.envRT) this.envRT.dispose();
-    this.envRT = this.pmrem.fromScene(this.sky, 0.04);
+    // Render the PROXY, not this.sky.
+    //
+    // this.sky lives on the dedicated sky layer so the half-resolution sky pass
+    // can draw it separately. PMREM's fromScene() uses its own internal camera,
+    // which sees layer 0 only — so from the moment the sky moved layers, the
+    // environment map has been rendered from an empty scene and every material
+    // in the game has been lit by a BLACK image-based light.
+    //
+    // An art review isolated it exactly: a pure white mirror with all lights
+    // disabled rendered at median 0, and sweeping environmentIntensity from 0 to
+    // 6x moved the ship by 0.4 of a value. Only the hemisphere light was left,
+    // which is blue-tinted, so every ship in the game measured a mean R minus B
+    // of -77 — navy blue hulls in daylight.
+    //
+    // _skyProxy shares the sky's geometry and material and sits on layer 0 in
+    // its own scene, which is exactly what this needs.
+    this._skyProxy.layers.set(0);
+    this.envRT = this.pmrem.fromScene(this._skyScene, 0.04);
     this.scene.environment = this.envRT.texture;
     this.scene.environmentIntensity = 1.05;
     this.updateCubeMap();

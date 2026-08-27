@@ -458,8 +458,17 @@ export class SceneView {
         || Math.abs(azim - (this._sunAzim ?? -999)) > 0.2) {
         this._sunElev = elev; this._sunAzim = azim;
         this.sky.setSunAngle(elev, azim);
-        this._sunEnvDue = (this._sunEnvDue || 0) - 1;
-        if (this._sunEnvDue <= 0) { this.sky.updateEnvMap(); this._sunEnvDue = 40; }
+        // Refresh the image-based lighting on ELEVATION MOVED, not on a call
+        // count. Counting calls meant the environment tracked real frames rather
+        // than the sun, so an art review found it stale by twenty-seven simulated
+        // minutes — and at high time compression the sky could race a long way
+        // ahead of the light the ships were being lit by. A degree and a half is
+        // below the threshold where the change is visible, and the PMREM
+        // convolution is expensive enough to be worth a threshold.
+        if (Math.abs(elev - (this._envElev ?? -999)) > 1.5) {
+          this._envElev = elev;
+          this.sky.updateEnvMap();
+        }
       }
     }
 
