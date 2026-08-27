@@ -20,10 +20,20 @@ import { World } from './World.js';
  */
 
 const RED_SHIP_NAMES = ['VOLNA', 'GROMKIY', 'BESSTRASHNY', 'SMETLIVY', 'ZORKIY'];
+// Two pools, because a fishing vessel is an FV and a freighter is an MV.
+//
+// There was one list of ten for twelve hulls, and the last two wrapped — so the
+// two trawlers on the bank were called MV NORDIC AURORA and MV KESTREL TRADER,
+// which were also the names of two merchants out on the northern lane. Duplicate
+// contacts on the same plot, with the wrong prefix, in an identification scenario
+// where telling one neutral from another is the whole problem.
 const MERCHANT_NAMES = [
   'MV NORDIC AURORA', 'MV KESTREL TRADER', 'MV BALTIC PIONEER', 'MV STAR OF LEITH',
   'MV ORION CREST', 'MV SEVEN SISTERS', 'MV ANDALUSIA', 'MV CAPE FINISTERRE',
-  'FV HAVFRUEN', 'FV NORDSTJERNEN',
+  'MV THORVALD BANKE',
+];
+const TRAWLER_NAMES = [
+  'FV HAVFRUEN', 'FV NORDSTJERNEN', 'FV SILDEBERG', 'FV MAAGEN', 'FV BRISLING',
 ];
 
 export function buildScenario(seed = 20260825) {
@@ -39,6 +49,11 @@ export function buildScenario(seed = 20260825) {
     seed,
     id: 'NORTH_ANCHOR',
     name: 'OPERATION NORTH ANCHOR',
+    // Chart datum for the origin. The graticule used to print nautical miles
+    // from the origin with hemisphere letters on them, which reads as a latitude
+    // and produced references like 150S — a latitude that cannot exist. With a
+    // datum the same grid prints real positions you could pass over the net.
+    datum: { lat: 62.0, lon: 8.0 },
     subtitle: 'Kestrel Sea · 0410 local · Task Force 44',
     seaState: 3,
     windDir: 210 * D2R,
@@ -295,7 +310,10 @@ export function buildScenario(seed = 20260825) {
     }
     const m = world.spawn({
       className: isTrawler ? 'TRAWLER' : 'MERCHANT', side: SIDE.NEUTRAL,
-      id: `NEU-${i}`, name: MERCHANT_NAMES[i % MERCHANT_NAMES.length],
+      id: `NEU-${i}`,
+      name: isTrawler
+        ? TRAWLER_NAMES[(i - 9) % TRAWLER_NAMES.length]
+        : MERCHANT_NAMES[i % MERCHANT_NAMES.length],
       x, z, heading: hdg, speed: (isTrawler ? 5 : 15) * KNOT,
       emcon: EMCON.RESTRICTED, roe: ROE.HOLD,
     });

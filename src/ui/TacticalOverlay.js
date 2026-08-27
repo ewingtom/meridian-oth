@@ -3,6 +3,43 @@ import {
   IDENT, DOMAIN, SIDE, NM, KNOT, clamp, tqBand, radarHorizon, EMCON_INFO,
   WEAPONS_QUALITY_TQ, AO_HALF,
 } from '../sim/constants.js';
+/*
+ * Grid references have to be positions, not distances wearing hemisphere letters.
+ *
+ * The graticule printed nautical miles from the scenario origin and appended N,
+ * S, E or W, so a line 150 nm south of the datum came out as "150S". Read as a
+ * latitude that is not merely wrong, it is impossible — latitude stops at 90. An
+ * art review quoted it straight back.
+ *
+ * The theatre is fictional, so it gets a datum and the same grid prints real
+ * positions. One nautical mile is one minute of latitude by definition; a minute
+ * of longitude shrinks with the cosine of the latitude, which at 62 north is a
+ * factor of about two.
+ */
+const CHART_DATUM = { lat: 62.0, lon: 8.0 };
+
+function dm(deg, hemis, pad) {
+  const h = deg < 0 ? hemis[1] : hemis[0];
+  const a = Math.abs(deg);
+  const d = Math.floor(a);
+  const m = Math.round((a - d) * 60);
+  // 59.7 minutes rounds to 60, which is the next degree, not "62 deg 60".
+  const dd = d + (m === 60 ? 1 : 0);
+  const mm = m === 60 ? 0 : m;
+  return `${String(dd).padStart(pad, '0')}\u00b0${String(mm).padStart(2, '0')}'${h}`;
+}
+
+function gridLat(gz) {
+  return dm(CHART_DATUM.lat + gz / NM / 60, 'NS', 2);
+}
+
+// gz here is the latitude the scale is taken at — the focus line, not the
+// meridian being labelled, which is not in scope where these are drawn anyway.
+function gridLon(gx, gz) {
+  const lat = CHART_DATUM.lat + gz / NM / 60;
+  const scale = Math.max(0.15, Math.cos(lat * Math.PI / 180));
+  return dm(CHART_DATUM.lon + gx / NM / 60 / scale, 'EW', 3);
+}
 
 /**
  * The tactical plot.
@@ -398,26 +435,27 @@ export class TacticalOverlay {
     ctx.globalAlpha = chart * 0.75;
     ctx.font = '8.5px ui-monospace, monospace';
     ctx.fillStyle = COLORS.gridLabel || 'rgba(140,175,200,0.65)';
+    // Grid lines are evenly spaced on the sea; their labels are not evenly spaced
+    // on the screen. Under any tilt the projection compresses hard toward the
+    // horizon, so the far ones pile into each other — a chart tipped back to the
+    // horizontal printed 008 deg 20008 deg 40'E where two labels had landed on
+    // the same pixels. Draw one, then skip anything that would touch it.
+    const LON_GAP = 52, LAT_GAP = 11;
+    let lastLonX = -1e9, lastLatY = -1e9;
     for (let i = -half; i <= half; i++) {
       const gx = Math.round(fx / step) * step + i * step;
       const p = this.project(gx, fz);
-      if (p && p.x > 40 && p.x < this.w - 40) {
+      if (p && p.x > 40 && p.x < this.w - 40 && Math.abs(p.x - lastLonX) >= LON_GAP) {
+        lastLonX = p.x;
         ctx.textAlign = 'center';
-        // Hemisphere letters, not a sign. A chart reference west of the origin
-        // reads 450W; it does not read minus-450-east, which is what this
-        // printed and what an art review quoted straight back.
-        const e = gx / NM;
-        ctx.fillText(`${Math.abs(e).toFixed(0)}${e < 0 ? 'W' : 'E'}`, p.x, 14);
+        ctx.fillText(gridLon(gx, fz), p.x, 14);
       }
       const gz = Math.round(fz / step) * step + i * step;
       const q = this.project(fx, gz);
-      if (q && q.y > 30 && q.y < this.h - 30) {
+      if (q && q.y > 30 && q.y < this.h - 30 && Math.abs(q.y - lastLatY) >= LAT_GAP) {
+        lastLatY = q.y;
         ctx.textAlign = 'left';
-        // World +z runs NORTH here, not south. Fixing the longitude labels I
-        // flipped this the wrong way and an art review caught the result: 50S at
-        // the top of the chart and 75N at the bottom.
-        const n = gz / NM;
-        ctx.fillText(`${Math.abs(n).toFixed(0)}${n < 0 ? 'S' : 'N'}`, 6, q.y - 3);
+        ctx.fillText(gridLat(gz), 6, q.y - 3);
       }
     }
     ctx.restore();
