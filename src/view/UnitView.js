@@ -259,9 +259,21 @@ function _tempVertexAO(m) {
  * about sRGB 160, which is 2.2% of the atlas and is deck markings that should be
  * white anyway.
  *
- * This compensates for the bake rather than fixing it. The real fix is to export
- * the albedo at the right level and the metalness near zero, at which point the
- * gain here should come back to 1.0.
+ * A later asset pass argued this gain over-corrects by about 2x, on the grounds
+ * that the sRGB 83 figure is a WHOLE-ATLAS mean — and the atlas also carries
+ * boot-topping, the underwater hull, funnel black, glass and array faces — while
+ * the superstructure band alone measures 118-123, which is already haze grey.
+ * That reasoning is sound, but it does not survive contact with the render: at
+ * gains of 1.0 / 1.4 / 1.8 / 2.4 the ship measures 66 / 72 / 80 / 92 mean luma
+ * in frame, against the 150-190 a sunlit haze-grey topside should give. Every
+ * setting is UNDER-lit, and at 1.4 the hull visibly slides back toward the black
+ * slab this was written to fix. So 2.4 stays.
+ *
+ * The discrepancy is presumably eaten between the atlas and the frame — baked
+ * occlusion, the environment term, and tone mapping each take a bite. Worth
+ * chasing properly, because a gain compensating for three unknowns is a fudge
+ * even when the picture looks right; the honest fix is still to export paint at
+ * the correct level and bring this back to 1.0.
  */
 const PAINT_ALBEDO_GAIN = 2.4;
 const PAINT_MAX_METALNESS = 0.12;
