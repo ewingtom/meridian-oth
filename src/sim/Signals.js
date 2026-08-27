@@ -250,7 +250,7 @@ function magFraction(u) {
   return worst;
 }
 
-const GENERATORS = [
+export const GENERATORS = [
   // ── replenishment ────────────────────────────────────────────────────────
   {
     kind: 'RAS', cooldown: 25 * MIN,
