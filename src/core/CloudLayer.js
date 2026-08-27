@@ -210,8 +210,18 @@ void main() {
   vec3 pMid = uCamPos + rd * (t0 + span * 0.5);
   vec2 uvMidSun = ((pMid.xz - uCamPos.xz) + wind + vec2(575.0, -340.0)) * 0.00026;
   float sunOccLod = max(0.0, fieldLod - 0.5);
-  float sunOcc = cf_shapeLod(uvMidSun + sunUV * 1.2, uCloudCoverage, sunOccLod) * 1.6
-               + cf_shapeLod(uvMidSun + sunUV * 3.4, uCloudCoverage, sunOccLod) * 1.4;
+  // The two taps sum to 3.0 when the field is dense, and exp(-3.0 * 1.6) is
+  // 0.008 — so under any real overcast EVERY sample came back fully shadowed and
+  // the whole deck rendered in the shadow colour alone. Measured with the alpha
+  // forced opaque, an overcast deck was painting itself [30,55,85]: a dark slate
+  // blue almost exactly the colour of the sky behind it. The deck was at 0.98
+  // opacity across the entire sky and simply invisible, which is why three art
+  // reviews called an overcast gale cloudless.
+  //
+  // Scaled so a dense deck is strongly but not totally shadowed, which is what
+  // an overcast actually looks like from underneath: grey and bright, not black.
+  float sunOcc = (cf_shapeLod(uvMidSun + sunUV * 1.2, uCloudCoverage, sunOccLod) * 0.62
+                + cf_shapeLod(uvMidSun + sunUV * 3.4, uCloudCoverage, sunOccLod) * 0.48);
 
   float trans = 1.0;                        // transmittance along the ray
   vec3 scatter = vec3(0.0);                 // accumulated in-scattered light
@@ -352,7 +362,23 @@ void main() {
 
   // Flying through the deck: fade out as the camera crosses cloud base, so an
   // aircraft does not punch through an infinitely thin sheet.
-  float thru = smoothstep(0.0, 520.0, abs(uCamPos.y - vWorldPos.y));
+  //
+  // Measure against the SLAB, not against vWorldPos. vWorldPos carries the earth
+  // curvature drop the vertex shader applies — radial squared over twice the
+  // earth's radius — which at 68 km is 2,096 m. The deck sits at 2,100 m. So for
+  // any camera at sea level there is a ring at about 68 km where the deformed
+  // deck passes through the camera's own altitude, |camY - deckY| goes to zero,
+  // and this fade takes the cloud to nothing.
+  //
+  // That ring is precisely the band a low camera spends all its time looking at.
+  // The deck was rendering at 0.95 density and full opacity and then being
+  // multiplied away right where it would have been visible: three art reviews
+  // called the sky cloudless, and the deck was there the whole time.
+  //
+  // The slab is a fixed altitude band, so testing against it is immune to
+  // whatever the vertex shader does to the geometry.
+  float outsideSlab = max(SLAB_LO - uCamPos.y, uCamPos.y - SLAB_HI);
+  float thru = smoothstep(0.0, 520.0, outsideSlab);
   alpha *= thru;
   alpha *= 1.0 - smoothstep(11000.0, 19000.0, uCamPos.y);
 
@@ -402,7 +428,10 @@ export class CloudLayer {
         uVisibility: sharedUniforms.uVisibility,
         uEarthR: sharedUniforms.uEarthR,
         uLitColor: { value: new THREE.Color(0xf6f9fc) },
-        uShadowColor: { value: new THREE.Color(0x62748a) },
+        // The underside of an overcast is a bright neutral grey, not a dark blue.
+        // At 0x62748a it sat within a few values of the zenith and the deck
+        // vanished into the sky it was supposed to be covering.
+        uShadowColor: { value: new THREE.Color(0x9aa6b4) },
         uOuter: { value: OUTER_R },
         uSquall: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
       },
