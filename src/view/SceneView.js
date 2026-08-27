@@ -428,6 +428,41 @@ export class SceneView {
     // and the visibility all walk to their new values over minutes, because a
     // step change in the horizon colour is more jarring than any amount of bad
     // weather.
+    // ── the sun moves ──────────────────────────────────────────────────────
+    //
+    // It never has. setSunAngle was called once at construction and by nothing
+    // else, so a five-hour patrol ran under a frozen 41-degree midday sun — an
+    // art review counted zero calls across three hundred frames and 293 sim
+    // minutes. A sky that does not change is the single loudest way for a long
+    // transit to feel like a screensaver, and this game is mostly long transits.
+    //
+    // The scenario starts at 04:10 local, so the player now actually sees dawn
+    // come up over the search, the light harden through the middle of the day,
+    // and the engagement fall into evening. All of it is already wired: the
+    // day/night colour ramp, the sun intensity, the sky fill and the image-based
+    // lighting all key off elevation.
+    {
+      const hours = (world.time / 3600) % 24;
+      // Solar elevation for a mid-latitude summer day: peak near 58 degrees at
+      // local noon, below the horizon before 05:00 and after 21:00.
+      // Sunrise at 05:00, solar noon at 13:00, sunset at 21:00 — a sixteen-hour
+      // sub-arctic summer day, which is what this theatre implies. The argument
+      // reaches plus or minus a quarter turn at the horizon crossings, so the
+      // curve passes through zero exactly at 05 and 21 and goes properly
+      // negative overnight rather than diving to -60 by breakfast.
+      const h = (hours - 13.0) * (Math.PI / 16.0);
+      const elev = 58.0 * Math.cos(h);
+      // East at sunrise, south at noon, west at sunset.
+      const azim = 90.0 + (hours - 5.0) * (180.0 / 16.0);
+      if (Math.abs(elev - (this._sunElev ?? -999)) > 0.12
+        || Math.abs(azim - (this._sunAzim ?? -999)) > 0.2) {
+        this._sunElev = elev; this._sunAzim = azim;
+        this.sky.setSunAngle(elev, azim);
+        this._sunEnvDue = (this._sunEnvDue || 0) - 1;
+        if (this._sunEnvDue <= 0) { this.sky.updateEnvMap(); this._sunEnvDue = 40; }
+      }
+    }
+
     if (world.weatherSys) {
       const s = world.weatherSys.state;
       const u = this.sky.sky.material.uniforms;
