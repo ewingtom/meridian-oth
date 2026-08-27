@@ -5,6 +5,7 @@ import { CloudLayer } from '../core/CloudLayer.js';
 import { bakeCloudField, bakeSeaField } from '../core/CloudField.js';
 import { RainField } from '../core/Rain.js';
 import { SKY_LAYER } from '../core/SkyLayerPass.js';
+import { BridgeInterior } from './BridgeInterior.js';
 
 const _rainVp = new THREE.Vector2();
 import { buildIsland, makeIslandMaterial } from '../core/Islands.js';
@@ -472,6 +473,25 @@ export class SceneView {
         const dv = this.renderer?.getDrawingBufferSize?.(_rainVp);
         if (dv) this.rain.setViewport(dv.x, dv.y);
         this.rain.update(camera, s.rain, world.weather.windSpeed || 6, this._wxHor);
+      }
+    }
+
+    // ── the wheelhouse ─────────────────────────────────────────────────────
+    // Built lazily for whichever ship the player is conning, parented to that
+    // ship's view so it rides her pitch and roll with no code of its own, and
+    // shown only while the camera is actually on her bridge.
+    {
+      const bu = cam.bridgeUnit;
+      if (cam.mode === 'BRIDGE' && bu && bu.alive) {
+        const uv = this.views.get(bu);
+        if (uv && uv.bridgeEye && (!this._bridge || this._bridgeUnit !== bu)) {
+          this._bridge?.dispose();
+          this._bridge = new BridgeInterior(bu, uv.group, uv.bridgeEye);
+          this._bridgeUnit = bu;
+        }
+        this._bridge?.setVisible(true);
+      } else if (this._bridge) {
+        this._bridge.setVisible(false);
       }
     }
 

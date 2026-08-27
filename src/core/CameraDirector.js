@@ -407,6 +407,9 @@ export class CameraDirector {
     // front of it, and it is where you would actually be standing.
     // Measured off the ship's own model where we have it (UnitView publishes a
     // bridgeEye once the hull streams in), class numbers only as a fallback.
+    // Inside the wheelhouse if one has been built for this ship, otherwise the
+    // open bridge wing as before.
+    const room = this.bridgeRoomFor?.(u);
     const eye = this.bridgeEyeFor?.(u);
     const eyeH = eye?.h ?? u.cls.bridgeEyeH ?? (u.cls.mastHeight || 28) * 0.46;
     // Far enough forward to be at the FRONT of the bridge rather than halfway
@@ -418,14 +421,31 @@ export class CameraDirector {
     // inboard it ends up inside the deckhouse.
     const sideOff = eye?.side ?? (u.cls.beam || 18) * 0.48;
     const sh = Math.sin(u.heading), ch = Math.cos(u.heading);
+    if (room) {
+      const e = room.eyeLocal();
+      // Rotate the room's local eye point out of the ship's frame. The room is
+      // parented to the ship's view and so already carries its vertical motion —
+      // rideWave must be false or the eye ends up in the deckhead.
+      const ex2 = cx + sh * e.z + (-ch) * e.x;
+      const ez2 = cz + ch * e.z + (sh) * e.x;
+      return this._bridgePose(dt, k, ocean, elapsed, u, ex2, ez2, e.y, sh, ch, false);
+    }
     // Starboard. Forward is (sin h, cos h) in x/z; in three.js's right-handed
     // frame the vector ninety degrees to the right of that is (-cos h, sin h).
     // The sign was inverted, which put the "starboard bridge wing" on the PORT
     // side — so the deckhouse sat in the right of frame instead of the left.
     const rx2 = -ch, rz2 = sh;
-    let ex = cx + sh * fwdOff + rx2 * sideOff;
-    let ez = cz + ch * fwdOff + rz2 * sideOff;
+    const ex = cx + sh * fwdOff + rx2 * sideOff;
+    const ez = cz + ch * fwdOff + rz2 * sideOff;
+    this._bridgePose(dt, k, ocean, elapsed, u, ex, ez, eyeH, sh, ch, true);
+  }
 
+  /**
+   * Place and aim the camera for a bridge station, given an eye point already
+   * resolved in render space. Shared by the wheelhouse and the open-wing
+   * fallback so both ride the sea identically.
+   */
+  _bridgePose(dt, k, ocean, elapsed, u, ex, ez, eyeH, sh, ch, rideWave = true) {
     let waveY = 0, roll = 0, pitch = 0;
     if (ocean) {
       const t = elapsed;
@@ -437,7 +457,7 @@ export class CameraDirector {
       roll = Math.atan2(sideY - waveY, dl) * 0.75;
     }
 
-    this.camera.position.set(ex, eyeH + waveY * 0.8, ez);
+    this.camera.position.set(ex, eyeH + (rideWave ? waveY * 0.8 : 0), ez);
     const q = new THREE.Quaternion();
     const e = new THREE.Euler(
       this.lookPitch + pitch,

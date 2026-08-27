@@ -30,6 +30,8 @@ class Game {
     // The bridge camera places its eye from the ship's own geometry rather than
     // from class numbers — see UnitView._measureBridgeEye.
     this.cam.bridgeEyeFor = (u) => this.view.views.get(u)?.bridgeEye || null;
+    // The wheelhouse, once SceneView has built one for this ship.
+    this.cam.bridgeRoomFor = (u) => (this.view._bridgeUnit === u ? this.view._bridge : null);
     this.pipeline.setup(this.view.scene, this.camera);
     // Remembered across sessions: a player who had to drop to Medium to get a
     // smooth frame should not have to do it again every time they load.
