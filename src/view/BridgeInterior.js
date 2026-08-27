@@ -328,7 +328,7 @@ export class BridgeInterior {
       if (size.y > 0.01) c.scale.setScalar(CONSOLE_H / size.y);
       const b2 = new THREE.Box3().setFromObject(c);
       c.position.y = -1.35 - b2.min.y;             // stand it on the deck
-      c.position.z = DEPTH * 0.5 - 0.75;           // tucked under the window sill
+      c.position.z = DEPTH * 0.5 - 0.50;           // hard up under the window sill
       c.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
       // Centre it on its own bounding box, not on its origin. The model's origin
       // sits off to one side, so a console placed at x = 0 hung in the right of
@@ -397,13 +397,29 @@ export class BridgeInterior {
    * Eye position in the unit's local frame: standing at the console, a metre
    * inside the aft bulkhead, looking out through the window band.
    */
+  /*
+   * The conning position, set once from the geometry.
+   *
+   * Across four rounds this view has gone dark, then console-filling-the-frame,
+   * then a black void, then lit-but-console-filling-the-frame again, because the
+   * eye kept being nudged to fix whichever symptom was showing. So state it as
+   * dimensions and stop moving it:
+   *
+   *   deck            group.y - 1.35
+   *   console top     1.05 m above the deck        = group.y - 0.30
+   *   eye             1.55 m above the deck        = group.y + 0.20
+   *   glass           group.z + DEPTH * 0.5
+   *   eye             1.40 m inside the glass      = group.z + DEPTH * 0.5 - 1.4
+   *   console face    0.50 m inside the glass      (set where it is built)
+   *
+   * Which puts the eye 0.90 m abaft the console and 0.50 m above its top, so the
+   * console's top edge falls about 29 degrees below the horizontal against a 62
+   * degree vertical field — the bottom sliver of the frame, and the horizon at
+   * eye level where a watchkeeper expects it.
+   */
   eyeLocal() {
-    // Standing AT the window — 1.4 m inside it, not 1.1 m inside the aft
-    // bulkhead 3.4 m away from it.
-    // 1.55 m above the deck — eye height for a standing watchkeeper, and clear
-    // of a 1.05 m console — set back far enough to see the whole window band.
     return new THREE.Vector3(0, this.group.position.y + 0.20,
-      this.group.position.z + DEPTH * 0.5 - 2.0);
+      this.group.position.z + DEPTH * 0.5 - 1.4);
   }
 
   /*

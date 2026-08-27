@@ -938,19 +938,23 @@ float shSeam(float x, float period, float width) {
    * paint. Quantise the horizontal into columns about a metre wide, let roughly a
    * third of them have a source, and run each one down.
    */
-  float colW = 1.15;
+  float colW = 0.85;
   float col = floor(horiz / colW + uSurfSeed * 31.0);
-  float colHas = step(0.66, shHash(vec2(col, 17.0)));
+  // Roughly three columns in five carry a source. At 0.66 this gave a third, and
+  // a review measured rust covering 2.9 percent of the hull against a 15-25
+  // percent target — structurally right and about ten times too sparse.
+  float colHas = step(0.42, shHash(vec2(col, 17.0)));
   // Soft profile across the column so a streak has edges rather than being a bar.
   float colX = abs(fract(horiz / colW + uSurfSeed * 31.0) - 0.5) * 2.0;
-  float colProf = (1.0 - smoothstep(0.15, 0.95, colX)) * colHas;
+  float colProf = (1.0 - smoothstep(0.30, 1.0, colX)) * colHas;
   // Where this column's source sits, and how far below it we are. A streak
-  // starts at its source and fades out over a couple of metres.
-  float srcY = 0.35 + 0.55 * shHash(vec2(col, 41.0));
-  float below = clamp((srcY - Q.y) / 0.55, 0.0, 1.0);
-  float runOut = below * (1.0 - smoothstep(0.55, 1.0, below));
+  // starts at its source and runs a long way — on a real hull side the weeps
+  // from the deck edge reach most of the way to the boot topping.
+  float srcY = 0.30 + 0.62 * shHash(vec2(col, 41.0));
+  float below = clamp((srcY - Q.y) / 0.95, 0.0, 1.0);
+  float runOut = below * (1.0 - smoothstep(0.72, 1.0, below));
   // A little break-up along the run so it is not a clean gradient.
-  float mottle = 0.55 + 0.45 * shFbm(vec2(horiz * 3.0, P.y * 0.30 + uSurfSeed * 9.0));
+  float mottle = 0.70 + 0.30 * shFbm(vec2(horiz * 3.0, P.y * 0.30 + uSurfSeed * 9.0));
   float dripAge = below;
   float rust = colProf * runOut * mottle * sideness * 1.05;
   // Heavier aft, where the uptake acid and the boat davits are.
@@ -964,8 +968,14 @@ float shSeam(float x, float period, float width) {
    * stain, so it is low-frequency noise biased aft and upward, and it DARKENS
    * and desaturates rather than colouring.
    */
-  float sootZone = smoothstep(0.05, 0.75, aft) * smoothstep(-0.15, 0.65, Q.y);
-  float soot = sootZone * smoothstep(0.28, 0.66, shFbm(P.xz * 0.10 + 51.0)) * 0.30;
+  // Soot reaches further forward and further down than this allowed, and the
+  // noise gate opened above the field's mean again. Measured at 0.3 percent of
+  // the hull against an 8-15 percent target abaft the uptakes.
+  // Abaft the uptakes and above the deck edge, not over the whole after half of
+  // the ship. Opened too far this covered 31 percent of the hull against an 8-15
+  // percent target — soot everywhere reads as a dirty ship, not a working one.
+  float sootZone = smoothstep(0.20, 0.72, aft) * smoothstep(-0.10, 0.50, Q.y);
+  float soot = sootZone * smoothstep(0.34, 0.66, shFbm(P.xz * 0.10 + 51.0)) * 0.58;
   soot *= 0.45 + 0.55 * up;                    // settles on horizontal faces
 
   /*
@@ -1040,7 +1050,7 @@ float shSeam(float x, float period, float width) {
 
   gRust = clamp(rust, 0.0, 0.85);
   gSoot = clamp(soot, 0.0, 0.6);
-  gSalt = clamp(salt * 3.0, 0.0, 0.5);
+  gSalt = clamp(salt * 2.0, 0.0, 0.5);
   diffuseColor.rgb = c;
 }`)
           .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
