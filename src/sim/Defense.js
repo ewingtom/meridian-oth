@@ -186,7 +186,34 @@ export class DefenseSystem {
       const rate = (mounts.pkSingle || 0.5) * 0.20 * fast * (1 - u.damage.weapons * 0.7);
       const p = 1 - Math.pow(1 - rate, dt);
       if (rng.next() < p) {
+        const killRange = Math.hypot(o.x - u.x, o.z - u.z);
         o.kill('CIWS');
+        /*
+         * Mission kill: a missile stopped is not a missile stopped in time.
+         *
+         * A Mach 2 airframe shredded at 300 m still has enormous kinetic energy,
+         * and a warhead broken up at 500 m still throws fragments into the hull
+         * at speed. The Navy calls this the mission-kill problem and it is the
+         * reason a last-ditch gun with a 1 800 m envelope is a last ditch rather
+         * than an answer — the intercept can succeed and the ship can still lose
+         * a radar face, a launcher or a boat.
+         *
+         * Damage falls off sharply with the range at which the round broke up and
+         * rises with how fast it was going, since the debris keeps the airframe's
+         * velocity. Nothing survives to reach the ship from beyond about 700 m.
+         */
+        const debrisR = 1 - Math.min(1, killRange / 700);
+        if (debrisR > 0) {
+          const spd = o.def.terminalSpeed || o.def.speed || 240;
+          const w = o.def.warhead || 200;
+          const frac = 0.16 * debrisR * debrisR * Math.sqrt(w / 250) * (0.5 + spd / 1200);
+          const dmg = u.maxHp * frac * (0.6 + rng.next() * 0.8);
+          if (dmg > 0.4) {
+            const killed = u.applyDamage(dmg, 'FRAGMENT');
+            this.events.push({ kind: 'DEBRIS', unit: u, ord: o, t: now, damage: dmg,
+              killed, range: killRange, x: o.x, z: o.z, alt: o.alt });
+          }
+        }
         this.events.push({ kind: 'CIWS_KILL', unit: u, ord: o, t: now, x: o.x, z: o.z, alt: o.alt });
       } else {
         this.events.push({ kind: 'CIWS_FIRE', unit: u, ord: o, t: now });

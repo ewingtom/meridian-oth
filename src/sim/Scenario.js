@@ -36,14 +36,45 @@ const TRAWLER_NAMES = [
   'FV HAVFRUEN', 'FV NORDSTJERNEN', 'FV SILDEBERG', 'FV MAAGEN', 'FV BRISLING',
 ];
 
-export function buildScenario(seed = 20260825) {
+/*
+ * A DIFFERENT SEA EVERY TIME.
+ *
+ * The seed defaulted to a constant, so every sortie was byte-identical: the same
+ * surface group in the same water on the same bearing, the same submarine, the
+ * same trawlers on the same bank. A player who had run it once already knew
+ * where to look, and scouting — which is the entire first act — became a
+ * formality they could skip.
+ *
+ * Pass a seed to reproduce a specific sortie (the briefing prints it, so a good
+ * one can be replayed or handed to someone else). Pass nothing and you get a new
+ * one.
+ */
+export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
   const rng = new Rng(seed);
 
-  // The enemy's true starting position, hidden from the player. The intel box the
-  // player is given is deliberately much larger than the truth.
-  const redX = rng.range(-150000, 130000);
-  const redZ = rng.range(165000, 265000);
-  const redCourse = Math.atan2(-redX * 0.4, -260000);
+  /*
+   * Where the enemy actually is, hidden from the player.
+   *
+   * This used to be a rectangle spanning x -150..130 km at z 165..265 km — which
+   * is always NORTH, so however the seed fell the answer to "which way do I
+   * send the Poseidon" was the same. Placing the group in POLAR coordinates
+   * about the objective instead puts it anywhere on a 150-degree arc, so the
+   * bearing is a real unknown and the search has to start from the intelligence
+   * rather than from memory.
+   *
+   * The arc is centred north because that is where their airfield is — Volsk
+   * NAS lies northeast, and a surface action group that appeared to the
+   * southwest would have had to steam past the whole task force to get there.
+   * Within that constraint it is wide open.
+   */
+  const OBJ = { x: 30000, z: 20000 };
+  const approachBrg = (-75 + rng.range(0, 150)) * D2R;      // 285 through 000 to 075
+  const approachRng = rng.range(185000, 295000);
+  const redX = OBJ.x + Math.sin(approachBrg) * approachRng;
+  const redZ = OBJ.z + Math.cos(approachBrg) * approachRng;
+  // They are closing the objective, with a few degrees of wander so the course
+  // is not a giveaway either.
+  const redCourse = Math.atan2(OBJ.x - redX, OBJ.z - redZ) + rng.range(-0.22, 0.22);
 
   const scenario = {
     seed,
@@ -250,14 +281,19 @@ export function buildScenario(seed = 20260825) {
 
   const rsub = world.spawn({
     className: 'SSGN_AKULA', side: SIDE.RED, id: 'RED-SS',
-    name: 'B-471 KRASNODAR', x: rng.range(-90000, 90000), z: rng.range(20000, 90000),
+    // Its own bearing, independent of the surface group — a submarine that always
+    // sat in the same box was the one contact the player never had to search for.
+    name: 'B-471 KRASNODAR',
+    x: OBJ.x + Math.sin(rng.range(-2.4, 2.4)) * rng.range(40000, 130000),
+    z: OBJ.z + Math.cos(rng.range(-2.4, 2.4)) * rng.range(30000, 110000),
     heading: Math.PI, speed: 5 * KNOT, alt: -150, emcon: EMCON.SILENT, roe: ROE.FREE,
   });
   rsub.depthOrdered = -150;
 
   const rmpa = world.spawn({
     className: 'MPA_BEAR', side: SIDE.RED, id: 'RED-MPA',
-    name: 'MEDVED 04', x: rng.range(-260000, 260000), z: 335000,
+    name: 'MEDVED 04',
+    x: redX + rng.range(-120000, 120000), z: redZ + rng.range(50000, 130000),
     heading: Math.PI, alt: 7000, emcon: EMCON.FULL, roe: ROE.TIGHT,
   });
 

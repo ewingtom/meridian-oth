@@ -22,7 +22,9 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 400000);
     this.cam = new CameraDirector(this.camera, this.canvas);
 
-    this.world = buildScenario();
+    // ?seed=12345 replays a specific sortie; without it every game is new.
+    const seedParam = new URLSearchParams(location.search).get('seed');
+    this.world = buildScenario(seedParam ? (parseInt(seedParam, 10) | 0) : undefined);
     this.mission = new Mission(this.world);
     this.world.mission = this.mission;
 
@@ -797,7 +799,9 @@ class Game {
 
   _fillBrief() {
     const s = this.world.scenario;
-    $('brief-sub').textContent = s.subtitle.toUpperCase();
+    // The seed is printed so a sortie can be replayed or handed on. Every game
+    // generates a new one; ?seed=N reruns exactly this sea.
+    $('brief-sub').textContent = `${s.subtitle.toUpperCase()} · SORTIE ${s.seed}`;
     const oob = this.world.units.filter(u => u.side === SIDE.BLUE)
       .map(u => `<div style="display:flex;justify-content:space-between"><span>${u.hullNo ? u.hullNo + '  ' : ''}${u.name}</span><span style="color:var(--dim)">${u.cls.display}</span></div>`).join('');
     $('brief-body').innerHTML = `
