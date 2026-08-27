@@ -209,6 +209,12 @@ export class TacticalOverlay {
       const p = this.project(c.x, c.z, 0);
       if (!p) continue;
       const r = c.r / mpp;
+      // NaN SLIPS THROUGH A RANGE CHECK. `NaN < 5` is false and `NaN > 3000` is
+      // false, so a non-finite radius passed both guards and went into
+      // createRadialGradient, which throws — taking down the ENTIRE tactical
+      // plot render for that frame, not just the squall. Test for finite
+      // explicitly; a range check is not a validity check.
+      if (!Number.isFinite(r) || !Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
       if (r < 5 || r > 3000) continue;
       const g = ctx.createRadialGradient(p.x, p.y, r * 0.2, p.x, p.y, r);
       g.addColorStop(0, `rgba(120,150,175,${0.16 * c.strength})`);
@@ -397,13 +403,19 @@ export class TacticalOverlay {
       const p = this.project(gx, fz);
       if (p && p.x > 40 && p.x < this.w - 40) {
         ctx.textAlign = 'center';
-        ctx.fillText(`${(gx / NM).toFixed(0)}E`, p.x, 14);
+        // Hemisphere letters, not a sign. A chart reference west of the origin
+        // reads 450W; it does not read minus-450-east, which is what this
+        // printed and what an art review quoted straight back.
+        const e = gx / NM;
+        ctx.fillText(`${Math.abs(e).toFixed(0)}${e < 0 ? 'W' : 'E'}`, p.x, 14);
       }
       const gz = Math.round(fz / step) * step + i * step;
       const q = this.project(fx, gz);
       if (q && q.y > 30 && q.y < this.h - 30) {
         ctx.textAlign = 'left';
-        ctx.fillText(`${(gz / NM).toFixed(0)}N`, 6, q.y - 3);
+        // World +z runs south, so a positive grid value is southing.
+        const n = -gz / NM;
+        ctx.fillText(`${Math.abs(n).toFixed(0)}${n < 0 ? 'S' : 'N'}`, 6, q.y - 3);
       }
     }
     ctx.restore();

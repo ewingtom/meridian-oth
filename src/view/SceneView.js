@@ -638,6 +638,13 @@ export class SceneView {
     this.ocean.setWakeCullRange(this.quality === 'exquisite' ? 6000
       : this.quality === 'high' ? 3200
         : this.quality === 'medium' ? 1800 : 900);
+    // Rain density and cloud march depth are the other two per-tier levers; an
+    // art review measured Low, Medium and High as byte-identical at equal
+    // resolution, which makes the setting a lie.
+    if (this.rain) {
+      this.rain.material.uniforms.uAmount.value *= this.quality === 'low' ? 0.45
+        : this.quality === 'medium' ? 0.75 : 1.0;
+    }
     this.ocean.setWakeSources(sources);
 
     // ── ordnance ───────────────────────────────────────────────────────────

@@ -480,6 +480,12 @@ export class RenderPipeline {
     // Drive the exposure that is actually connected to something. The renderer's
     // own toneMappingExposure is inert while the composer owns the frame (see
     // the note in VIGNETTE_GRADE_SHADER); keep it in step for the raw path.
+    // Shadow map, bloom radius and grain already key off the tier; make the
+    // heavier ones do so too, so the tiers are not byte-identical at equal
+    // resolution as an art review measured.
+    if (this.gradePass) {
+      this.gradePass.uniforms.uVignetteStrength.value = q === 'low' ? 0.10 : 0.22;
+    }
     const exposure = q === 'exquisite' ? 1.34 : q === 'high' ? 1.30 : 1.22;
     this.renderer.toneMappingExposure = exposure;
     if (this.gradePass) this.gradePass.uniforms.uExposure.value = exposure;
