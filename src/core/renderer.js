@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { SkyLayerPass, SKY_LAYER } from './SkyLayerPass.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { CheapBloomPass } from './CheapBloomPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
@@ -227,7 +227,14 @@ export class RenderPipeline {
       // ambient occlusion in COLOR_0, which costs nothing.
       this.ssaoPass.enabled = false;
       // Half-res bloom: ~4× cheaper mip chain, still sells soft specular bloom.
-      this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w * 0.5, h * 0.5), 0.18, 0.5, 0.85);
+      // NOT UnrealBloomPass. Measured at 1280x720 on the target machine it was
+      // 20.6 ms of a 35.7 ms frame — fifty-eight percent of everything the
+      // renderer did, for a glow around the sun. It builds a five-level mip
+      // pyramid and runs a thirteen-tap separable blur at every level on
+      // half-float targets, which lands on a slow path here; its own reported
+      // resolution had also drifted to 298x338, an aspect the frame never had.
+      // Bloom is a low-frequency effect and does not need any of that.
+      this.bloomPass = new CheapBloomPass({ strength: 0.55, threshold: 0.82, radius: 1.0 });
       this.gradePass = new ShaderPass(VIGNETTE_GRADE_SHADER);
       this.fxaaPass = new ShaderPass(FXAAShader);
       const pr = this.renderer.getPixelRatio();
@@ -376,9 +383,12 @@ export class RenderPipeline {
       // was a sun with no glow, muzzle flashes with no bite and explosions that
       // did not read as bright. Open it back up.
       this.bloomPass.enabled = usePost;
-      this.bloomPass.strength = q === 'exquisite' ? 0.22 : 0.17;
+      // Strength is on a different scale to UnrealBloomPass's: this composites a
+      // single blurred bright-pass rather than a weighted mip pyramid, so the
+      // same visible glow needs a larger number.
+      this.bloomPass.strength = q === 'exquisite' ? 0.62 : 0.52;
       this.bloomPass.threshold = 0.84;
-      this.bloomPass.radius = 0.55;
+      this.bloomPass.radius = q === 'exquisite' ? 1.4 : 1.0;
     }
     if (this.gradePass) {
       this.gradePass.enabled = usePost;
@@ -443,7 +453,9 @@ export class RenderPipeline {
       this.composer.setSize(w, h);
     }
     // Composer.setSize resets bloom to full-res; force half-res for the mip chain.
-    if (this.bloomPass) this.bloomPass.setSize(w * 0.5, h * 0.5);
+    // The pass downsamples to a quarter of each axis internally, so hand it the
+    // real frame size rather than a pre-halved one.
+    if (this.bloomPass) this.bloomPass.setSize(w, h);
     if (this.ssaoPass) this.ssaoPass.setSize(w * 0.5, h * 0.5);
     if (this.fxaaPass) {
       this.fxaaPass.material.uniforms['resolution'].value.set(1 / (w * pr), 1 / (h * pr));
