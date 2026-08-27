@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { SkyLayerPass, SKY_LAYER } from './SkyLayerPass.js';
+import { PipView } from './PipView.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { CheapBloomPass } from './CheapBloomPass.js';
@@ -32,7 +33,7 @@ class ViewportRestorePass extends Pass {
 }
 ViewportRestorePass._v2 = new THREE.Vector2();
 
-const VIGNETTE_GRADE_SHADER = {
+export const VIGNETTE_GRADE_SHADER = {
   uniforms: {
     tDiffuse: { value: null },
     uVignetteStrength: { value: 0.22 },
@@ -260,6 +261,7 @@ export class RenderPipeline {
     this._scene = scene;
     this._camera = camera;
     this.skyPass = new SkyLayerPass(this.renderer, scene, camera);
+    this.pip = new PipView(this.renderer, scene);
 
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -694,11 +696,17 @@ export class RenderPipeline {
 
     // Sky and clouds first, at half resolution, into their own target. The blit
     // quad in the scene carries the result and the main pass skips that layer.
+    // The inset renders BEFORE the sky pass and the main frame, so the canvas is
+    // left bound to the main output. It borrows the sky layer directly (see
+    // PipView) rather than the blit quad, which belongs to the main camera.
+    this.pip?.render(this.skyPass);
+
     this.skyPass?.render();
 
     if (!this._wantComposer || !this.composer) {
       this.renderer.render(this._scene, this._camera);
       this.skyPass?.restore();
+      this.pip?.drawOverlay();
       return;
     }
 
@@ -753,5 +761,8 @@ export class RenderPipeline {
     } finally {
       info.autoReset = prevAutoReset;
     }
+
+    // Composite last, straight onto the canvas, so no pass can grade it twice.
+    this.pip?.drawOverlay();
   }
 }

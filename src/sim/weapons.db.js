@@ -24,6 +24,7 @@ export const WEAPONS = {
   // ───────────────────────── BLUE ─────────────────────────
   LRASM: {
     id: 'LRASM', name: 'AGM-158C LRASM', category: 'ASM', side: 'BLUE',
+    vls: true,
     range: 560000, speed: 240, terminalSpeed: 240, seekerRange: 55000, seekerWidth: 22000,
     rcs: 0.05, cruiseAlt: 60, terminalAlt: 6, pkTerminal: 0.82, warhead: 450,
     stealth: 0.25, datalink: true, discriminates: true, cyclesToFire: 3,
@@ -45,12 +46,14 @@ export const WEAPONS = {
   },
   SM2: {
     id: 'SM2', name: 'RIM-174 SM-2 Block IIIC', category: 'SAM', side: 'BLUE',
+    vls: true,
     range: 170000, speed: 1100, seekerRange: 30000, rcs: 0.1, pkSingle: 0.72,
     minAlt: 3, maxAlt: 24000, needsIllum: false, cyclesToFire: 1,
     blurb: 'Area air defence. Reaches far — but only as far as the ship can see, and a sea-skimmer stays under the horizon until 30 km.',
   },
   ESSM: {
     id: 'ESSM', name: 'RIM-162 ESSM Block 2', category: 'SAM', side: 'BLUE',
+    vls: true,
     range: 50000, speed: 1300, seekerRange: 20000, rcs: 0.05, pkSingle: 0.80,
     minAlt: 2, maxAlt: 15000, quadPacked: true, cyclesToFire: 1, fireAndForget: true,
     blurb: 'Quad-packed point defence. Four to a VLS cell, which is how a destroyer survives a saturation raid instead of running dry.',
@@ -85,6 +88,7 @@ export const WEAPONS = {
   },
   VLA: {
     id: 'VLA', name: 'RUM-139C VL-ASROC', category: 'TORPEDO', side: 'BLUE',
+    vls: true,
     range: 22000, speed: 300, seekerRange: 2200, pkTerminal: 0.55, warhead: 44,
     rocketThrown: true, cyclesToFire: 1,
     blurb: 'A Mk 54 flown to the datum on a rocket. Puts a torpedo in the water 12 miles away sixty seconds after the sonar contact.',
@@ -110,6 +114,7 @@ export const WEAPONS = {
   },
   KALIBR: {
     id: 'KALIBR', name: '3M-54 KALIBR-NK', category: 'ASM', side: 'RED',
+    vls: true,
     range: 420000, speed: 240, terminalSpeed: 950, seekerRange: 45000, seekerWidth: 16000,
     rcs: 0.25, cruiseAlt: 40, terminalAlt: 10, pkTerminal: 0.78, warhead: 400,
     stealth: 0.6, datalink: true, cyclesToFire: 3,
@@ -136,12 +141,14 @@ export const WEAPONS = {
   },
   FORT: {
     id: 'FORT', name: 'S-300F FORT', category: 'SAM', side: 'RED',
+    vls: true,
     range: 90000, speed: 1500, seekerRange: 25000, rcs: 0.15, pkSingle: 0.66,
     minAlt: 25, maxAlt: 25000, needsIllum: true, cyclesToFire: 1,
     blurb: 'Long-reach area SAM, but semi-active — it needs a continuous illuminator, and there are only so many channels.',
   },
   KINZHAL_SAM: {
     id: 'KINZHAL_SAM', name: '3K95 KINZHAL', category: 'SAM', side: 'RED',
+    vls: true,
     range: 12000, speed: 850, seekerRange: 12000, pkSingle: 0.6, rcs: 0.05,
     minAlt: 5, maxAlt: 6000, cyclesToFire: 0.5,
     blurb: 'Short-range point defence. Radar-directed, so it competes for the same fire-control channels as the long-range battery.',

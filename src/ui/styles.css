@@ -770,3 +770,38 @@ body.cheap-ui #bottom .panel {
 body.cheap-ui #topbar {
   background: linear-gradient(180deg, rgba(6,11,16,0.98), rgba(6,11,16,0.92));
 }
+
+/* ── inset camera ─────────────────────────────────────────────────────────
+   The picture itself is drawn into the WebGL canvas by PipView; this is only
+   the chrome. Type goes in the DOM rather than the frame because a 512-pixel
+   render target scaled down cannot hold a legible 10 px label, and because the
+   HUD's own type should look like the HUD's own type. Position comes from
+   PipView.rect, which is in CSS pixels for exactly this reason. */
+#pip-frame {
+  position: absolute; pointer-events: none; z-index: 32;
+  border: 1px solid var(--line-hi);
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.55);
+  opacity: 0; transition: none;
+}
+#pip-frame .pip-bar {
+  position: absolute; left: 0; right: 0; top: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 7px;
+  background: linear-gradient(to bottom, rgba(6, 11, 16, 0.86), rgba(6, 11, 16, 0));
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  color: var(--accent); text-transform: uppercase; white-space: nowrap; overflow: hidden;
+}
+#pip-frame .pip-rec {
+  width: 5px; height: 5px; border-radius: 50%; background: #ff5a5a; flex: none;
+  animation: pip-rec 1.6s steps(1, end) infinite;
+}
+@keyframes pip-rec { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0.15; } }
+#pip-frame .pip-corner {
+  position: absolute; width: 9px; height: 9px;
+  border: 1px solid var(--accent); opacity: 0.55;
+}
+#pip-frame .pip-corner.tl { left: -1px; top: -1px; border-right: 0; border-bottom: 0; }
+#pip-frame .pip-corner.tr { right: -1px; top: -1px; border-left: 0; border-bottom: 0; }
+#pip-frame .pip-corner.bl { left: -1px; bottom: -1px; border-right: 0; border-top: 0; }
+#pip-frame .pip-corner.br { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
+@media (prefers-reduced-motion: reduce) { #pip-frame .pip-rec { animation: none; } }

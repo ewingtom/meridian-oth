@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import './ui/styles.css';
 import { RenderPipeline } from './core/renderer.js';
 import { CameraDirector, CAM } from './core/CameraDirector.js';
+import { PipDirector } from './core/PipDirector.js';
 import { SceneView } from './view/SceneView.js';
 import { TacticalOverlay } from './ui/TacticalOverlay.js';
 import { Hud, fmt } from './ui/Hud.js';
@@ -35,6 +36,15 @@ class Game {
     // The wheelhouse, once SceneView has built one for this ship.
     this.cam.bridgeRoomFor = (u) => (this.view._bridgeUnit === u ? this.view._bridge : null);
     this.pipeline.setup(this.view.scene, this.camera);
+    // The inset. It borrows the scene, so it has to be told which parts of it
+    // are laid out for the main camera and therefore need re-framing — see
+    // PipView.bindWorld.
+    this.pipeline.pip.bindWorld({
+      scene: this.view.scene, sky: this.view.sky, ocean: this.view.ocean,
+      clouds: this.view.clouds, camDirector: this.cam,
+    });
+    this.pipDir = new PipDirector(this.pipeline.pip, this.cam, this.world);
+    this._buildPipChrome();
     // Remembered across sessions: a player who had to drop to Medium to get a
     // smooth frame should not have to do it again every time they load.
     this.quality = 'high';
@@ -79,6 +89,58 @@ class Game {
     this._perfOn = false;
   }
 
+  /** DOM chrome for the inset. The picture is WebGL; the type is not. */
+  _buildPipChrome() {
+    const el = document.createElement('div');
+    el.id = 'pip-frame';
+    el.innerHTML = '<div class="pip-bar"><span class="pip-rec"></span><span class="pip-t"></span></div>'
+      + '<i class="pip-corner tl"></i><i class="pip-corner tr"></i>'
+      + '<i class="pip-corner bl"></i><i class="pip-corner br"></i>';
+    document.getElementById('app').appendChild(el);
+    this._pipEl = el;
+    this._pipT = el.querySelector('.pip-t');
+    this._pipLabel = '';
+  }
+
+  /**
+   * Where the inset is allowed to live: the plot, minus the panels either side
+   * and the hint strip along the bottom. Measured rather than guessed, because
+   * both panels are sized by their content and change width with the layout.
+   */
+  _pipSafeArea() {
+    const L = document.getElementById('left')?.getBoundingClientRect();
+    const R = document.getElementById('right')?.getBoundingClientRect();
+    const T = document.getElementById('topbar')?.getBoundingClientRect();
+    const x = L ? L.right : 0;
+    const right = R ? R.left : window.innerWidth;
+    const y = T ? T.bottom : 0;
+    // Clear of the control hint strip and the selection bar along the bottom.
+    const bottom = window.innerHeight - 74;
+    this.pipeline.pip.safeArea = { x, y, w: Math.max(200, right - x), h: Math.max(140, bottom - y) };
+  }
+
+  _syncPipChrome() {
+    const el = this._pipEl, r = this.pipeline.pip?.rect;
+    if (!el) return;
+    if (!r || r.opacity < 0.02) {
+      if (el.style.opacity !== '0') el.style.opacity = '0';
+      this._pipShown = false;
+      return;
+    }
+    // Re-measure as each cut opens. The panels do not exist yet when the game is
+    // constructed — measuring there gave a 200 px "safe area" at the origin —
+    // and they change width with the layout, so once per cut is both correct
+    // and cheap: three getBoundingClientRect calls, a few times a minute.
+    if (!this._pipShown) { this._pipShown = true; this._pipSafeArea(); }
+    el.style.opacity = r.opacity.toFixed(3);
+    el.style.left = `${Math.round(r.x)}px`;
+    el.style.top = `${Math.round(r.y)}px`;
+    el.style.width = `${Math.round(r.w)}px`;
+    el.style.height = `${Math.round(r.h)}px`;
+    const label = this.pipDir.label;
+    if (label !== this._pipLabel) { this._pipLabel = label; this._pipT.textContent = label; }
+  }
+
   // ── world event → presentation ────────────────────────────────────────────
   _wireWorld() {
     this.world.on((ev) => {
@@ -89,17 +151,21 @@ class Game {
           const o = ev.ord, u = ev.unit;
           if (u) {
             this.view.launchCloud(u.x, u.z, u.isAir ? u.alt : 12, o.heading,
-              o.category === 'ASM' ? 1.5 : 1);
+              o.category === 'ASM' ? 1.5 : 1, o.phase === 'VLAUNCH');
           }
           this.audio.launch(o.category, dist(o.x, o.z));
-          // Sea Power's signature move: when the player's own anti-ship missiles
-          // leave the rails, ride one out. It is spectacle, and it is also the
-          // clearest possible lesson in what a long-range shot actually involves.
-          if (this.autoMissileCam && o.side === SIDE.BLUE && o.category === 'ASM'
+          // Sea Power's signature move: when anti-ship missiles leave the rails,
+          // ride one out. This used to take the MAIN camera and fly it away with
+          // the round, which meant the spectacle cost you the tactical picture
+          // at the exact moment you needed it — the reason it was so easy to
+          // turn off. It goes in the inset now, so you get both.
+          if (this.autoMissileCam && o.category === 'ASM'
             && !this._rodeSalvo?.has(o.salvoId)) {
             this._rodeSalvo = this._rodeSalvo || new Set();
             this._rodeSalvo.add(o.salvoId);
-            if (this.timeScale <= 8) this.cam.rideMissile(o);
+            if (this.timeScale <= 8) {
+              this.pipDir.offer('LAUNCH', { ord: o, unit: u, from: u, x: o.x, z: o.z, alt: o.alt });
+            }
           }
           break;
         }
@@ -119,12 +185,17 @@ class Game {
           const d = dist(ev.x, ev.z);
           if (d < 6000) this.cam.shake(clamp(1.4 - d / 6000, 0, 1.4));
           if (ev.target.side === SIDE.BLUE) this.hud.pushAlert(`${ev.target.name} HIT`, 'danger', 4);
+          this.pipDir.offer('HIT', {
+            unit: ev.target, x: ev.x, z: ev.z,
+            orbit0: Math.atan2(ev.x - ev.target.x, ev.z - ev.target.z),
+          });
           break;
         }
         case 'INTERCEPT': {
           if (ev.success) {
             this.view.boom(ev.x, ev.z, Math.max(20, ev.alt), { scale: 0.65, airburst: true });
             this.audio.boom(false, dist(ev.x, ev.z));
+            this.pipDir.offer('INTERCEPT', { unit: ev.unit, x: ev.x, z: ev.z, alt: ev.alt });
           }
           break;
         }
@@ -143,6 +214,7 @@ class Game {
             );
             this.audio.ciws(dist(u.x, u.z));
           }
+          this.pipDir.offer('CIWS', { unit: u, x: o.x, z: o.z, alt: o.alt });
           break;
         }
         case 'DECOY': {
@@ -157,6 +229,7 @@ class Game {
           if (!u.despawned) {
             this.view.boom(u.x, u.z, 14, { scale: 3.2 });
             this.audio.boom(true, dist(u.x, u.z));
+            this.pipDir.offer('SUNK', { unit: u, x: u.x, z: u.z, orbit0: u.heading + 2.2 });
           }
           break;
         }
@@ -352,6 +425,7 @@ class Game {
       this.camera.updateProjectionMatrix();
       this.pipeline.resize();
       this.overlay.resize();
+      this._pipSafeArea();
     });
 
     window.addEventListener('blur', () => this.keys.clear());
@@ -926,6 +1000,10 @@ class Game {
     // origin and the hulls are still placed against the old one, which puts the
     // subject a kilometre off frame.
     this.cam.update(0.0001, this.view.ocean, this.view.elapsed);
+    this.pipDir?.update(0.0001);
+    // The inset renders on alternate frames; a capture is a single frame, so
+    // line the parity up rather than gambling on it.
+    if (this.pipeline.pip) this.pipeline.pip._frame = 0;
     this.view.update(0.0001, this.world, this.selection);
     this.pipeline.render(this.view.elapsed);
     const out = document.createElement('canvas');
@@ -1114,6 +1192,9 @@ class Game {
     const _t1 = performance.now();
 
     this.cam.update(dt, this.view.ocean, this.view.elapsed);
+    // After the main camera has settled, so the inset's curvature lift is
+    // computed against where the main camera actually is this frame.
+    this.pipDir.update(dt);
     this.view.update(dt, this.world, this.selection);
     this.overlay.selection = this.selection;
     this.overlay.selectedTrack = this.selectedTrack;
@@ -1129,6 +1210,7 @@ class Game {
         : this.cam.mode === 'MISSILE' ? 22
           : Math.max(30, this.cam.dist));
     this.pipeline.render(this.view.elapsed);
+    this._syncPipChrome();
     const _t3 = performance.now();
     this._simMs = _t1 - _t0;
     this._viewMs = _t2 - _t1;
@@ -1194,6 +1276,10 @@ class Game {
     document.body.classList.toggle(
       'cheap-ui', this.quality === 'low' || this.quality === 'medium',
     );
+    // The inset is a second render of the scene. It is small and it only runs
+    // during an event, but Low exists for machines that are already short of a
+    // frame, and spectacle is the first thing that should go there.
+    if (this.pipeline.pip) this.pipeline.pip.enabled = this.quality !== 'low';
     try { localStorage.setItem('oth.quality', this.quality); } catch (e) { /* private mode */ }
     this.hud?.pushAlert(`Graphics: ${this.quality.toUpperCase()}`, 'info', 2.2);
   }
@@ -1389,6 +1475,7 @@ async function boot() {
       game.world.step(dt, scale);
       game.mission.step();
       game.cam.update(dt, game.view.ocean, game.view.elapsed);
+      game.pipDir.update(dt);
       game.view.update(dt, game.world, game.selection);
       done += dt;
     }

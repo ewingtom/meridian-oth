@@ -121,6 +121,17 @@ export class OrdnanceSystem {
     });
     if (def.category === 'TORPEDO') { o.alt = -30; o.phase = 'RUN'; }
     if (def.category === 'SAM' || def.category === 'CIWS') o.phase = 'INTERCEPT';
+    // A cell-launched round does not leave on the target bearing — it leaves
+    // straight up, and turns over once it is clear of the deck. Every round in
+    // this game used to appear thirty metres ahead of the ship already pointed
+    // at the enemy, which is how a canister works and not how a Mk 41 does.
+    if (def.vls && def.category !== 'TORPEDO') {
+      o.phase = 'VLAUNCH';
+      o.x = shooter.x; o.z = shooter.z;
+      o.alt = shooter.isAir ? shooter.alt : 6;
+      o.speed = 0;
+      o.vlt = 0; o.vSpd = 0; o.vPitch = Math.PI / 2;
+    }
     this.world.weapons.push(o);
     this.events.push({ kind: 'LAUNCH', ord: o, shooter, t: now });
     if (track) track.engagedBy.add(o.id);
@@ -132,6 +143,11 @@ export class OrdnanceSystem {
     for (const o of w.weapons) {
       if (!o.alive) continue;
       o.age += dt;
+      if (o.phase === 'VLAUNCH' && this._vlaunch(o, dt)) {
+        o.trail.push({ x: o.x, z: o.z, y: o.alt, t: now });
+        if (o.trail.length > 260) o.trail.shift();
+        continue;
+      }
       switch (o.category) {
         case 'ASM': this._asm(o, dt, now); break;
         case 'SAM': this._sam(o, dt, now); break;
@@ -149,6 +165,48 @@ export class OrdnanceSystem {
       const o = w.weapons[i];
       if (!o.alive && now - (o._deadAt || (o._deadAt = now)) > 8) w.weapons.splice(i, 1);
     }
+  }
+
+  /**
+   * The first two seconds out of a vertical cell.
+   *
+   * The round comes out on the booster with no aerodynamic authority at all,
+   * climbs clear of the ship, and only then pitches over onto the bearing. The
+   * tip-over is smoothstepped rather than linear because a real one is limited
+   * by how fast the airframe can be rotated, not by a clock — and because a
+   * linear turn reads, from the inset camera, as the missile being hinged.
+   *
+   * A surface-to-air round does all this about twice as hard: it is climbing to
+   * meet something that is already inbound, so it has no seconds to spend.
+   *
+   * Returns true while it still owns the round.
+   */
+  _vlaunch(o, dt) {
+    const sam = o.category === 'SAM';
+    const vMax = sam ? 260 : 95;
+    const accel = sam ? 230 : 70;
+    const tipStart = sam ? 0.45 : 0.95;
+    const tipDur = sam ? 1.1 : 2.0;
+
+    o.vlt += dt;
+    o.vSpd = Math.min(vMax, o.vSpd + accel * dt);
+    const k = clamp((o.vlt - tipStart) / tipDur, 0, 1);
+    const ease = k * k * (3 - 2 * k);
+    o.vPitch = (Math.PI / 2) * (1 - ease);
+
+    const hs = o.vSpd * Math.cos(o.vPitch);
+    o.alt += o.vSpd * Math.sin(o.vPitch) * dt;
+    o.x += Math.sin(o.heading) * hs * dt;
+    o.z += Math.cos(o.heading) * hs * dt;
+    o.speed = hs;
+    o.distance += hs * dt;
+
+    if (k >= 1) {
+      o.phase = sam ? 'INTERCEPT' : 'BOOST';
+      o.speed = Math.max(hs, 60);
+      return false;
+    }
+    return true;
   }
 
   // ── anti-ship missile ─────────────────────────────────────────────────────

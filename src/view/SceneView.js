@@ -861,7 +861,18 @@ export class SceneView {
       if (v.pitchNode) {
         const climb = (v._lastY === undefined) ? 0 : (y - v._lastY) / Math.max(1e-3, dt);
         v._lastY = y;
-        v.pitchNode.rotation.x = clamp(-Math.atan2(climb, Math.max(20, o.speed)), -0.8, 0.8);
+        if (o.phase === 'VLAUNCH') {
+          // Straight from the sim. Everywhere else the attitude is inferred from
+          // how much the round climbed since the last frame, which is fine for a
+          // shallow cruise but useless here: the frame-to-frame delta is a small
+          // difference of large numbers against a floating origin, and during a
+          // launch — the one time attitude really is the subject — it produced a
+          // round that flickered between vertical and level. The launcher knows
+          // the pitch exactly, so it says so.
+          v.pitchNode.rotation.x = -o.vPitch;
+        } else {
+          v.pitchNode.rotation.x = clamp(-Math.atan2(climb, Math.max(20, o.speed)), -0.8, 0.8);
+        }
       }
       if (v.trail) {
         v._tt = (v._tt || 0) + dt;
@@ -880,7 +891,7 @@ export class SceneView {
         }
         v.trail.update(this.elapsed, cam.camera);
       }
-      const hot = o.phase === 'BOOST' ? 1.35 : 0.75;
+      const hot = (o.phase === 'BOOST' || o.phase === 'VLAUNCH') ? 1.35 : 0.75;
       if (v.glow) {
         const cruise = (o.def.speed || 900) < 380;
         const base = cruise ? 0.5 : ((o.def.warhead || 200) > 400 ? 1.7 : 0.8);
@@ -1145,10 +1156,18 @@ export class SceneView {
     this.fx.seaSpray(new THREE.Vector3(this.cam.rx(x), 1, this.cam.rz(z)), new THREE.Vector3(0, 1, 0), { scale });
   }
 
-  launchCloud(x, z, alt, dir, scale = 1) {
+  /**
+   * Efflux at the launcher. `vertical` is for a cell launch, where the round
+   * goes straight up and the plume boils off the deck rather than streaming
+   * away on the target bearing.
+   */
+  launchCloud(x, z, alt, dir, scale = 1, vertical = false) {
     this.fx.launchCloud(
       new THREE.Vector3(this.cam.rx(x), alt, this.cam.rz(z)),
-      new THREE.Vector3(Math.sin(dir), 0.3, Math.cos(dir)), { scale },
+      vertical
+        ? new THREE.Vector3(Math.sin(dir) * 0.18, 1, Math.cos(dir) * 0.18)
+        : new THREE.Vector3(Math.sin(dir), 0.3, Math.cos(dir)),
+      { scale: vertical ? scale * 1.35 : scale },
     );
   }
 }
