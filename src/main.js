@@ -172,6 +172,24 @@ class Game {
           this.audio.blip();
           break;
         }
+        case 'SIGNAL_OPENED': {
+          // A SCORED DECISION NEEDS REAL SECONDS TO ANSWER IN.
+          //
+          // Deadlines are held in SIM time — a signal typically allows four
+          // minutes. At 64x compression those four minutes are three and a half
+          // real seconds, so the player watched decisions expire against them
+          // faster than the card could be read, and the debrief then marked them
+          // down for it. An art review found exactly that pattern.
+          //
+          // Time compression is the player's tool for skipping the empty ocean;
+          // the moment something actually asks them a question, the empty ocean
+          // is over. Drop to a scale where the window is a real minute or more.
+          if (ev.scored && this.timeScale > 8) {
+            this.setTimeScale(4);
+            this.hud.pushAlert('TIME COMPRESSION REDUCED — DECISION PENDING', 'info', 3);
+          }
+          break;
+        }
         case 'ILLUM': case 'SEEKER': case 'TORPEDO': {
           this.audio.klaxon();
           break;

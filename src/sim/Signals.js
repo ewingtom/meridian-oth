@@ -158,6 +158,11 @@ export class SignalSystem {
     const w = this.world;
     const s = o instanceof Signal ? o : new Signal({ ...o, opened: w.time });
     if (s.choices && s.deadline === null) s.deadline = w.time + (o.window || 240);
+    // Tell the game a scored decision has opened, so it can give the player real
+    // time to answer in — see the SIGNAL_OPENED handler in main.js.
+    if (s.choices && s.choices.length) {
+      w.emit?.({ type: 'SIGNAL_OPENED', scored: true, sig: s });
+    }
     this.log.push(s);
     if (s.needsAnswer) this.active.push(s);
     w.comms.push({
