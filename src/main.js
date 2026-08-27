@@ -379,7 +379,20 @@ class Game {
         });
         this.audio.ui('confirm');
       }
-      if (!e.shiftKey) this.pendingOrder = null;
+      /*
+       * The order mode STAYS ARMED until it is cancelled.
+       *
+       * It used to clear itself after one click unless shift was held, which
+       * made a second waypoint order silently impossible: the mode was gone, so
+       * the next click fell through to the selection branch, and a click on open
+       * sea there clears the selection. Directing a unit to one point and then
+       * to another — the most ordinary thing anyone does with this — dropped the
+       * selection and left the first waypoint standing.
+       *
+       * The HUD has always told the player "SHIFT to queue, ESC to cancel",
+       * which describes a mode that persists. This makes the code agree with it:
+       * shift means queue, escape means cancel, and clicking means order.
+       */
       return;
     }
 
@@ -393,6 +406,9 @@ class Game {
       if (sea && this.selection.length) {
         for (const u of this.selection) u.orderWaypoint(sea.x, sea.z, { append: e.shiftKey });
         this.audio.ui('click');
+        // A right-click is a complete order in itself, so it also ends an armed
+        // mode rather than leaving the crosshair up afterwards.
+        this.pendingOrder = null;
       }
       return;
     }
