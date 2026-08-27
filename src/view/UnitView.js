@@ -946,17 +946,43 @@ float shSeam(float x, float period, float width) {
   float colHas = step(0.42, shHash(vec2(col, 17.0)));
   // Soft profile across the column so a streak has edges rather than being a bar.
   float colX = abs(fract(horiz / colW + uSurfSeed * 31.0) - 0.5) * 2.0;
-  float colProf = (1.0 - smoothstep(0.30, 1.0, colX)) * colHas;
+  // Soft-edged. A weep is a stain that spread, not a painted mark, and a hard
+  // profile at close range read as a row of orange tally marks down the side.
+  float colProf = (1.0 - smoothstep(0.06, 1.0, colX)) * colHas;
   // Where this column's source sits, and how far below it we are. A streak
   // starts at its source and runs a long way — on a real hull side the weeps
   // from the deck edge reach most of the way to the boot topping.
-  float srcY = 0.30 + 0.62 * shHash(vec2(col, 41.0));
-  float below = clamp((srcY - Q.y) / 0.95, 0.0, 1.0);
-  float runOut = below * (1.0 - smoothstep(0.72, 1.0, below));
+  /*
+   * A streak runs a fixed number of METRES, not a fraction of the ship.
+   *
+   * This measured the run as (srcY - Q.y) / 0.95 in normalised box coordinates.
+   * Q.y is normalised by the mesh's half-height, and a hull mesh includes its
+   * mast — around 17 m — so a weep meant to run three metres was spread over
+   * sixteen. Across the six metres of freeboard you can actually see, the fade
+   * barely changed, and the streak stopped being a streak: a review measured the
+   * vertical-to-horizontal gradient ratio at 1.9 to 2.4 at every angle, where
+   * discrete vertical weeps should give under 1. It read as one long stain
+   * following the sheer, which is exactly what a gradient that never varies down
+   * the plate looks like.
+   *
+   * Three metres, in world units, whatever the ship.
+   */
+  float srcYm = uSurfCtr.y + uSurfHalf.y * (0.22 + 0.56 * shHash(vec2(col, 41.0)));
+  float belowM = srcYm - P.y;
+  // Every weep runs a different distance — a long one has been running since the
+  // last docking, a short one since the last rain. All the same length reads as
+  // a pattern.
+  float runLen = 1.5 + 3.2 * shHash(vec2(col, 73.0));
+  float runOut = smoothstep(0.0, 0.14, belowM)
+               * (1.0 - smoothstep(runLen * 0.35, runLen, belowM));
+  float below = clamp(belowM / max(0.5, runLen), 0.0, 1.0);
   // A little break-up along the run so it is not a clean gradient.
-  float mottle = 0.70 + 0.30 * shFbm(vec2(horiz * 3.0, P.y * 0.30 + uSurfSeed * 9.0));
+  // Break-up along the run, but at a LOWER vertical frequency than the run's own
+  // length — at 0.30 per metre the mottle period was about three metres, the
+  // same as the streak, so it chopped every weep into horizontal blocks.
+  float mottle = 0.70 + 0.30 * shFbm(vec2(horiz * 3.0, P.y * 0.10 + uSurfSeed * 9.0));
   float dripAge = below;
-  float rust = colProf * runOut * mottle * sideness * 1.05;
+  float rust = colProf * runOut * mottle * sideness * 0.72;
   // Heavier aft, where the uptake acid and the boat davits are.
   rust *= mix(0.80, 1.25, aft);
 
@@ -1030,7 +1056,9 @@ float shSeam(float x, float period, float width) {
   c = mix(c, vec3(0.62, 0.63, 0.65), clamp(salt * 2.2, 0.0, 0.30));
   // Rust is the one warm thing on a grey ship. Two tones, because a fresh weep is
   // orange and an old one has gone brown and been rained on.
-  vec3 rustCol = mix(vec3(0.42, 0.20, 0.10), vec3(0.28, 0.18, 0.14), dripAge);
+  // Corrosion product on a grey ship is a dull iron oxide, not traffic-cone
+  // orange. Fresh at the source, browner and greyer as it runs.
+  vec3 rustCol = mix(vec3(0.33, 0.19, 0.12), vec3(0.25, 0.19, 0.16), dripAge);
   c = mix(c, rustCol, clamp(rust, 0.0, 0.85) * uSurfHull);
   // Soot darkens and desaturates; it does not tint.
   float sootLum = dot(c, vec3(0.2126, 0.7152, 0.0722));
