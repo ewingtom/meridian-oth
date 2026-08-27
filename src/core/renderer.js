@@ -285,7 +285,13 @@ export class RenderPipeline {
       // ambient occlusion builds its own depth/normal G-buffer and is the
       // better-maintained pass; it also actually respects a world-space radius,
       // which is what let the old one be mis-tuned into invisibility.
-      this.ssaoPass = new GTAOPass(scene, camera, w * 0.5, h * 0.5);
+      // Quarter resolution, eight samples. Measured against half/sixteen on a
+      // close shot of a destroyer, the two are indistinguishable — 74 versus 73
+      // peak difference over 16.6k versus 19.8k affected pixels — because what
+      // this buys is broad contact shading where the deckhouse meets the deck,
+      // not a fine detail that survives at full rate. It is eight times less
+      // work for the same picture.
+      this.ssaoPass = new GTAOPass(scene, camera, w * 0.25, h * 0.25);
       this.ssaoPass.output = GTAOPass.OUTPUT.Default;
       this.ssaoPass.blendIntensity = 0.85;
       // OFF unless the quality tier asks for it. Ground-truth AO is a depth and
@@ -293,6 +299,35 @@ export class RenderPipeline {
       // already spending its budget on the water. The assets carry baked
       // ambient occlusion in COLOR_0, which costs nothing.
       this.ssaoPass.enabled = false;
+
+      // Keep the sky out of the ambient-occlusion pre-pass.
+      //
+      // This is why the pass spent so long switched off. GTAO renders the scene
+      // once more with an override material to get depth and normals — and an
+      // override material replaces depthWrite along with everything else. The
+      // sky box and the cloud slab both disable depth writes in their own
+      // materials, and the slab in particular is a plane covering the whole
+      // upper hemisphere, so in the pre-pass the sky acquired a surface. GTAO
+      // then computed an occlusion term for it from garbage normals and got
+      // near-zero, and the blend is a multiply: the sky came out black. It
+      // looked like an unfixable interaction with the custom sky and was left
+      // disabled on every tier, including the one whose whole purpose is to
+      // turn things like this on.
+      //
+      // The sky already has its own layer, for the half-resolution sky pass.
+      // Hiding that layer from the pre-pass leaves those pixels at cleared
+      // depth, which is exactly the case the GTAO shader discards — so they
+      // keep the white clear, and multiplying by white is what "no occlusion"
+      // means. Verified: with this in place the sky band comes back bit-identical
+      // to the pass being off, and the hulls keep the occlusion term.
+      const gtaoRender = this.ssaoPass.render.bind(this.ssaoPass);
+      this.ssaoPass.render = (renderer, writeBuffer, readBuffer, dt, maskActive) => {
+        const mask = camera.layers.mask;
+        camera.layers.disable(SKY_LAYER);
+        try { gtaoRender(renderer, writeBuffer, readBuffer, dt, maskActive); } finally {
+          camera.layers.mask = mask;
+        }
+      };
       // Half-res bloom: ~4× cheaper mip chain, still sells soft specular bloom.
       // NOT UnrealBloomPass. Measured at 1280x720 on the target machine it was
       // 20.6 ms of a 35.7 ms frame — fifty-eight percent of everything the
@@ -437,12 +472,11 @@ export class RenderPipeline {
     }
 
     if (this.ssaoPass) {
-      // ULTRA only. Ground-truth AO is a full-frame depth + normal pre-pass and
-      // a poisson denoise on top of a pipeline whose ocean shader is already the
-      // expensive thing in the frame. It also currently blacks out the sky (the
-      // sky writes no depth, so the AO term discards and the pass composites the
-      // cleared value over it), so it stays off until that is dealt with.
-      this.ssaoPass.enabled = false && (q === 'exquisite');
+      // Exquisite only. Ground-truth AO is a full-frame depth + normal pre-pass
+      // and a poisson denoise on top of a pipeline whose ocean shader is already
+      // the expensive thing in the frame — it buys shaded creases on the hulls,
+      // and it costs a second pass over the scene to get them.
+      this.ssaoPass.enabled = q === 'exquisite';
       // kernelRadius, minDistance and maxDistance are all in VIEW-SPACE METRES.
       // They were set as though they were normalised depth: a 20 m sampling
       // kernel that only counted occluders between 0.4 mm and 16 cm of depth
@@ -561,7 +595,7 @@ export class RenderPipeline {
     // The pass downsamples to a quarter of each axis internally, so hand it the
     // real frame size rather than a pre-halved one.
     if (this.bloomPass) this.bloomPass.setSize(w, h);
-    if (this.ssaoPass) this.ssaoPass.setSize(w * 0.5, h * 0.5);
+    if (this.ssaoPass) this.ssaoPass.setSize(w * 0.25, h * 0.25);
     if (this.fxaaPass) {
       this.fxaaPass.material.uniforms['resolution'].value.set(1 / (w * pr), 1 / (h * pr));
     }
@@ -679,7 +713,10 @@ export class RenderPipeline {
       distanceExponent: 1.0,
       thickness: r * 0.6,
       scale: this._aoQuality === 'exquisite' ? 1.15 : 0.95,
-      samples: this._aoQuality === 'exquisite' ? 16 : 10,
+      // Eight, not sixteen. The pass runs at a quarter of each axis, where the
+      // extra eight samples were measured to be invisible — see the note where
+      // the pass is built.
+      samples: 8,
       distanceFallOff: 1.0,
       screenSpaceRadius: false,
     });
