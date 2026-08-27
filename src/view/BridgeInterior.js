@@ -58,7 +58,15 @@ function makeShell(width) {
   // throws reflections of the instruments down rather than into the watch's
   // eyes, so the uprights lean. The glass itself is not drawn — nothing should
   // stand between the player and the sea.
-  const sillY = 0.05, headY = HEIGHT - 1.55, rake = 0.22;
+  // A BRIDGE WINDOW IS BIG, AND YOU STAND AT IT.
+  //
+  // The first version put a 1.3 m window 3.4 m ahead of the eye. At a 62 degree
+  // field of view that subtends a letterbox slot in the middle of the frame, and
+  // the rest is deckhead and bulkhead — an art review measured the whole room
+  // contributing 0.02% of the pixels, which is what a dark box with a slot in it
+  // looks like. A real wheelhouse window runs from below waist height to above
+  // the head, and the officer of the deck stands AT it, not three metres back.
+  const sillY = -0.55, headY = HEIGHT - 0.75, rake = 0.22;
   const n = Math.max(4, Math.round(width / 1.6));
   for (let i = 0; i <= n; i++) {
     const x = -width * 0.5 + (i / n) * width;
@@ -91,11 +99,19 @@ export class BridgeInterior {
 
     loadModel('bridge_console').then((src) => {
       const c = src.clone(true);
+      // SIZE IT SO YOU CAN SEE OVER IT.
+      //
+      // Scaled to 82% of an eleven-metre room this is a nine-metre wall, and
+      // with the eye standing at the window it sat directly in front of the
+      // player's face — the frame went completely black. A bridge console is
+      // chest height and you look over it at the sea. Scale to a fixed HEIGHT,
+      // not to the room's width, and cap it below eye level.
       const size = new THREE.Vector3(); new THREE.Box3().setFromObject(c).getSize(size);
-      if (size.x > 0.01) c.scale.setScalar((width * 0.82) / size.x);
+      const CONSOLE_H = 1.05;                      // chest height above the deck
+      if (size.y > 0.01) c.scale.setScalar(CONSOLE_H / size.y);
       const b2 = new THREE.Box3().setFromObject(c);
       c.position.y = -1.35 - b2.min.y;             // stand it on the deck
-      c.position.z = DEPTH * 0.5 - 0.95;           // under the windows
+      c.position.z = DEPTH * 0.5 - 0.75;           // tucked under the window sill
       c.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
       this.group.add(c);
     }).catch(() => { /* the room stands without it */ });
@@ -128,8 +144,12 @@ export class BridgeInterior {
    * inside the aft bulkhead, looking out through the window band.
    */
   eyeLocal() {
-    return new THREE.Vector3(0, this.group.position.y + 0.15,
-      this.group.position.z - DEPTH * 0.5 + 1.1);
+    // Standing AT the window — 1.4 m inside it, not 1.1 m inside the aft
+    // bulkhead 3.4 m away from it.
+    // 1.55 m above the deck — eye height for a standing watchkeeper, and clear
+    // of a 1.05 m console — set back far enough to see the whole window band.
+    return new THREE.Vector3(0, this.group.position.y + 0.20,
+      this.group.position.z + DEPTH * 0.5 - 2.0);
   }
 
   setVisible(v) { this.group.visible = v; }
