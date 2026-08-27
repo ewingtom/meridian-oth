@@ -2,7 +2,7 @@ import { SIDE, EMCON, ROE, IDENT, DOMAIN, NM, KNOT, AO_HALF, Rng, D2R, WEAPONS_Q
 import { World } from './World.js';
 
 /*
- * OPERATION NORTH ANCHOR — the Kestrel Sea, 0410 local.
+ * OPERATION NORTH ANCHOR — the Kestrel Sea, 0515 local.
  *
  * The scenario is built so that every phase forces one specific lesson, and the
  * player discovers each lesson by running into the physics rather than by reading
@@ -85,10 +85,19 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
     // and produced references like 150S — a latitude that cannot exist. With a
     // datum the same grid prints real positions you could pass over the net.
     datum: { lat: 62.0, lon: 8.0 },
-    subtitle: 'Kestrel Sea · 0410 local · Task Force 44',
+    subtitle: 'Kestrel Sea · 0515 local · Task Force 44',
     seaState: 3,
     windDir: 210 * D2R,
-    startTime: 4 * 3600 + 10 * 60,
+    // Sunrise is at 05:00 (see the solar curve in SceneView). Opening at 04:10
+    // meant the first fifty minutes of every game — and the menu behind it, and
+    // every screenshot anyone ever took of this — happened in nautical twilight
+    // with the sun nine degrees below the horizon. It was not subtle: the frame
+    // averaged 31 of 255 and the ships were black. Fifteen minutes after
+    // sunrise the sun is about three degrees up: a warm path across the water,
+    // hulls lit gold rather than silhouetted, and the light hardening steadily
+    // through the search into the engagement. Same dawn patrol, on the right
+    // side of the horizon.
+    startTime: 5 * 3600 + 15 * 60,
     timeLimit: 7.5 * 3600,
     redTruth: { x: redX, z: redZ, course: redCourse },
     // What INTELLIGENCE thinks, which is not the same thing.

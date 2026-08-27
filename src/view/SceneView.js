@@ -496,9 +496,8 @@ export class SceneView {
     // minutes. A sky that does not change is the single loudest way for a long
     // transit to feel like a screensaver, and this game is mostly long transits.
     //
-    // The scenario starts at 04:10 local, so the player now actually sees dawn
-    // come up over the search, the light harden through the middle of the day,
-    // and the engagement fall into evening. All of it is already wired: the
+    // The scenario opens just after sunrise, so the player sees the light
+    // harden through the search and the engagement fall into evening. All of it is already wired: the
     // day/night colour ramp, the sun intensity, the sky fill and the image-based
     // lighting all key off elevation.
     {

@@ -77,7 +77,7 @@ export class SkySystem {
     /*
      * The moon.
      *
-     * There wasn't one, and this scenario opens at 0410 with first usable light
+     * There wasn't one, and this scenario opens at 0515 with the sun barely up
      * at 0505 — at four times speed that is fourteen real minutes before the
      * player can see anything at all. With no moon and the sun below the horizon
      * the key light is literally zero, so every ship rendered black. That is
