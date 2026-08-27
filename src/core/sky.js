@@ -226,11 +226,19 @@ export class SkySystem {
   _applyLightBudget() {
     const oc = this._overcast ?? 0;
     const rain = this._rainFall ?? 0;
-    const beam = (1 - 0.94 * oc) * (1 - 0.30 * rain);
-    const diffuse = (1 - 0.55 * oc) * (1 - 0.12 * rain);
-    // Published for the ocean shader, which is hand-lit and cannot read the
-    // three.js light rig. Weather only — night is handled by the palette.
-    this.weatherLight = diffuse;
+    // Cloud does not scale the two components together. Clear noon is roughly
+    // 1000 W/m2 global, of which about 850 is the direct beam and 150 diffuse.
+    // Full overcast is roughly 250, and ALL of it diffuse — so the beam collapses
+    // while the diffuse term nearly doubles. Getting this backwards is what put
+    // the hulls in near-silhouette under an overcast that should have been the
+    // flattest, most evenly lit weather in the game.
+    const beam = (1 - 0.98 * oc) * (1 - 0.35 * rain);
+    const diffuse = (1 + 0.75 * oc) * (1 - 0.15 * rain);
+    // What the ocean shader needs is TOTAL irradiance, not the diffuse part; it
+    // is hand-lit and cannot read the three.js light rig. Weighted by the clear
+    // sky's split, this lands at 0.28 under full overcast, against the ~0.25 the
+    // real numbers give. Night is handled by the palette, not here.
+    this.weatherLight = 0.85 * beam + 0.15 * diffuse;
     this.sunLight.intensity = (this._sunBase ?? 1) * beam * this.keyScale;
     this.hemiLight.intensity = (this._hemiBase ?? 0.5) * diffuse * this.fillScale;
     this.scene.environmentIntensity = (this._envBase ?? 1) * diffuse * this.fillScale;

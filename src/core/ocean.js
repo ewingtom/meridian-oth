@@ -1184,7 +1184,12 @@ void main() {
   // storm sea at mean luminance 109 against a clear sea's 104 — brighter, on six
   // percent of the light. Dim the body before the aerial perspective, since the
   // haze it fades into is the sky's own colour and has already been dimmed.
-  base *= uLightScale;
+  // ...but only the part of the pixel that is not a mirror. reflColor is the sky,
+  // and the sky has already been dimmed by the same weather. Scaling the blended
+  // result dimmed the reflection twice, which is what left a storm sea reading 34
+  // against a sky of 131 — near-black water under a pale grey ceiling, when a
+  // grazing angle should be throwing that ceiling straight back at the camera.
+  base *= mix(uLightScale, 1.0, fresnelUse);
 
   float airMass = 1.0 - exp(-opticalDepth(dist, uCamPos.y, vWorldPos.y, 3.912 / uVisibility));
   airMass += (hash(gl_FragCoord.xy * 0.2 + uTime * 0.11) - 0.5) * 0.012;
@@ -1476,7 +1481,7 @@ void main() {
   float skyGrey = 1.0 - clamp((max(uHorizonColor.b - uHorizonColor.r, 0.0)) * 5.5, 0.0, 1.0);
   float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
   color = mix(color, mix(vec3(lum), uHorizonColor * 0.42, 0.45), skyGrey * 0.62);
-  color *= uLightScale;
+  color *= mix(uLightScale, 1.0, clamp(fres * band, 0.0, 1.0));
 
   float airMass = 1.0 - exp(-opticalDepth(dist, uCamPos.y, vWorldPos.y, 3.912 / uVisibility));
   // Grazing-angle wash-out. This was far too eager: from bridge height the view

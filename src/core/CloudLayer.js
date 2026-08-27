@@ -252,6 +252,23 @@ void main() {
   vec3 pMid = uCamPos + rd * (t0 + span * 0.5);
   vec2 uvMidSun = ((pMid.xz - uCamPos.xz) + wind + vec2(575.0, -340.0)) * 0.00026;
   float sunOccLod = max(0.0, fieldLod - 0.5);
+
+  // An overcast is not a flat ceiling.
+  //
+  // Once coverage passes about 0.8 the density field saturates: the threshold has
+  // dropped far enough that almost every sample is fully dense, powder pins at
+  // 0.98, sun occlusion pins with it, and every pixel of the deck shades to the
+  // same grey. Measured across the top of the frame, a gale sky came out at
+  // standard deviation 3.1 against 14.8 for a clear one — the flatness was right
+  // in direction and far too complete. Real stratus varies in thickness over a
+  // few kilometres, and that variation is most of what you see from underneath.
+  //
+  // Two octaves at kilometre scale, sampled once per ray rather than per step,
+  // modulating how much light gets through. It is gated on coverage so scattered
+  // cumulus, which already has structure from its own shapes, is untouched.
+  float deckVary = smoothstep(0.55, 0.95, 1.0 - uCloudCoverage);
+  float deckThick = cf_noise(uvMidSun * 3.1 + 17.3) * 0.68
+                  + cf_noise(uvMidSun * 7.7 - 5.9) * 0.32;
   // The two taps sum to 3.0 when the field is dense, and exp(-3.0 * 1.6) is
   // 0.008 — so under any real overcast EVERY sample came back fully shadowed and
   // the whole deck rendered in the shadow colour alone. Measured with the alpha
@@ -369,7 +386,8 @@ void main() {
     // between the base of the ray and its top; computing it at the first hit and
     // carrying it down the ray is visually the same lit-side/shadow-side result
     // for a fraction of the work.
-    float sunT = exp(-sunOcc * 1.6);
+    // Thicker where the deck is thicker; see deckThick above.
+    float sunT = exp(-sunOcc * 1.6) * mix(1.0, 0.42 + 1.05 * deckThick, deckVary);
     // Powder / dark-edge: thin cloud scatters more light back than thick cloud.
     float powder = 1.0 - exp(-d * 4.0);
     // Height within the slab: tops are bright, bases are slate.
