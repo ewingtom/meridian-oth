@@ -312,6 +312,7 @@ uniform bool receiveShadow;
 uniform float uTime;
 uniform vec3 uSunDirection;
 uniform vec3 uSunColor;
+uniform float uLightScale;
 uniform vec3 uCamPos;
 uniform samplerCube uEnvMap;
 uniform vec3 uDeepColor;
@@ -1161,6 +1162,16 @@ void main() {
   float lum = dot(base, vec3(0.2126, 0.7152, 0.0722));
   base = mix(base, mix(vec3(lum), uHorizonColor * 0.34, 0.45), skyGrey * 0.62);
 
+  // The weather has to change how much light there IS, not only its colour.
+  //
+  // uSunColor carries the sun's COLOUR; SceneView copies sunLight.color into it
+  // and nothing ever handed this shader the sun's INTENSITY. So the sea kept
+  // full clear-noon brightness through a gale, and an art review measured the
+  // storm sea at mean luminance 109 against a clear sea's 104 — brighter, on six
+  // percent of the light. Dim the body before the aerial perspective, since the
+  // haze it fades into is the sky's own colour and has already been dimmed.
+  base *= uLightScale;
+
   float airMass = 1.0 - exp(-opticalDepth(dist, uCamPos.y, vWorldPos.y, 3.912 / uVisibility));
   airMass += (hash(gl_FragCoord.xy * 0.2 + uTime * 0.11) - 0.5) * 0.012;
   airMass = clamp(airMass, 0.0, 1.0);
@@ -1250,6 +1261,7 @@ uniform float uTime;
 uniform vec3 uCamPos;
 uniform vec3 uSunDirection;
 uniform vec3 uSunColor;
+uniform float uLightScale;
 uniform vec3 uDeepColor;
 uniform vec3 uShallowColor;
 uniform vec3 uFogColor;
@@ -1436,6 +1448,7 @@ void main() {
   float skyGrey = 1.0 - clamp((max(uHorizonColor.b - uHorizonColor.r, 0.0)) * 5.5, 0.0, 1.0);
   float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
   color = mix(color, mix(vec3(lum), uHorizonColor * 0.42, 0.45), skyGrey * 0.62);
+  color *= uLightScale;
 
   float airMass = 1.0 - exp(-opticalDepth(dist, uCamPos.y, vWorldPos.y, 3.912 / uVisibility));
   // Grazing-angle wash-out. This was far too eager: from bridge height the view
@@ -1487,6 +1500,7 @@ export class OceanField {
       uWaveB: { value: waveB },
       uSunDirection: { value: sunDirection.clone() },
       uSunColor: { value: new THREE.Color(0xfff0d8) },
+      uLightScale: { value: 1.0 },
       uEnvMap: { value: null },
       uDeepColor: { value: new THREE.Color(0x123a55) },
       uShallowColor: { value: new THREE.Color(0x1d5878) },
@@ -1555,6 +1569,7 @@ export class OceanField {
         uCamPos: this.uniforms.uCamPos,
         uSunDirection: this.uniforms.uSunDirection,
         uSunColor: this.uniforms.uSunColor,
+        uLightScale: this.uniforms.uLightScale,
         uDeepColor: this.uniforms.uDeepColor,
         uShallowColor: this.uniforms.uShallowColor,
         uFogColor: this.uniforms.uFogColor,

@@ -37,17 +37,17 @@ const REGIMES = [
   {
     id: 'BROKEN', name: 'BROKEN CLOUD — MODERATE SEA',
     seaState: 3.8, coverage: 0.62, visNm: 12, rain: 0.05,
-    zenith: 0x2b5478, horizon: 0xa4b8c6, fog: 0xa8bac6, weight: 1.4,
+    zenith: 0x2a4e6e, horizon: 0x99adbb, fog: 0x9dafbb, weight: 1.4,
   },
   {
     id: 'OVERCAST', name: 'OVERCAST — REDUCED VISIBILITY',
     seaState: 4.5, coverage: 0.86, visNm: 7, rain: 0.18,
-    zenith: 0x4a5c6c, horizon: 0x93a2ad, fog: 0x94a4b0, weight: 1.0,
+    zenith: 0x3b4854, horizon: 0x78858f, fog: 0x7a8792, weight: 1.0,
   },
   {
     id: 'GALE', name: 'GALE — HEAVY SEA, SENSORS DEGRADED',
     seaState: 5.6, coverage: 0.95, visNm: 3.5, rain: 0.55,
-    zenith: 0x44505c, horizon: 0x808d96, fog: 0x84909a, weight: 0.55,
+    zenith: 0x2e3740, horizon: 0x5c656d, fog: 0x606970, weight: 0.55,
   },
 ];
 

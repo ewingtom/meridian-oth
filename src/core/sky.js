@@ -99,6 +99,8 @@ export class SkySystem {
     this._elevation = 22;
     this._azimuth = 215;
     this._lastEnvRefresh = -999;
+    this._overcast = 0;
+    this._rainFall = 0;
     this._followTarget = new THREE.Vector3();
     this.setSunAngle(this._elevation, this._azimuth);
     this.updateEnvMap();
@@ -133,7 +135,7 @@ export class SkySystem {
     // at 1.5 — full daylight — for every elevation at or below zero, which is
     // why forcing the sun to minus six degrees changed the sky by six percent
     // and the game had no night at all.
-    this.sunLight.intensity = THREE.MathUtils.lerp(1.5, 2.6, t) * this.dayFactor;
+    this._sunBase = THREE.MathUtils.lerp(1.5, 2.6, t) * this.dayFactor;
     const warm = new THREE.Color(0xff9d52);
     const white = new THREE.Color(0xfff4e2);
     this.sunLight.color.copy(warm).lerp(white, t);
@@ -173,8 +175,53 @@ export class SkySystem {
 
     // Sky fill and image-based lighting follow the sun down too, or hulls stay
     // fully lit under a night sky.
-    this.hemiLight.intensity = THREE.MathUtils.lerp(0.05, 0.62, this.dayFactor);
-    this.scene.environmentIntensity = THREE.MathUtils.lerp(0.06, 1.05, this.dayFactor);
+    this._hemiBase = THREE.MathUtils.lerp(0.05, 0.62, this.dayFactor);
+    this._envBase = THREE.MathUtils.lerp(0.06, 1.05, this.dayFactor);
+    this._sunColorBase = u.uSunColor.value.clone();
+    this._applyLightBudget();
+  }
+
+  // How much cloud is between the sun and the sea. Coverage alone is not enough:
+  // scattered fair-weather cumulus at 0.42 does not dim anything, while thick
+  // stratus at 0.9 takes the direct beam away entirely.
+  setOvercast(coverage, rain = 0) {
+    this._overcast = THREE.MathUtils.smoothstep(coverage ?? 0, 0.35, 0.95);
+    this._rainFall = THREE.MathUtils.clamp(rain ?? 0, 0, 1);
+    this._applyLightBudget();
+  }
+
+  // Weather has to take light OUT of the scene, not just change its colour.
+  //
+  // The regimes only ever swapped the sky gradient for a greyer one, and left
+  // the sun, the hemisphere and the environment map at full strength. So a gale
+  // was lit exactly as brightly as a clear noon and an art review measured the
+  // OVERCAST sky at mean luminance 166 against CLEAR's 157 — the storm was the
+  // brightest weather in the game. The flatness was right and the level was
+  // backwards.
+  //
+  // Real numbers: under unbroken stratus the direct beam at the surface is
+  // essentially zero, and global horizontal irradiance falls to somewhere around
+  // a quarter of the clear-sky value — the diffuse FRACTION goes up, the diffuse
+  // TOTAL still goes down. Hence a hard cut on the sun and a softer one on the
+  // two diffuse terms, which multiply out to about 0.25 at full overcast.
+  _applyLightBudget() {
+    const oc = this._overcast ?? 0;
+    const rain = this._rainFall ?? 0;
+    const beam = (1 - 0.94 * oc) * (1 - 0.30 * rain);
+    const diffuse = (1 - 0.55 * oc) * (1 - 0.12 * rain);
+    // Published for the ocean shader, which is hand-lit and cannot read the
+    // three.js light rig. Weather only — night is handled by the palette.
+    this.weatherLight = diffuse;
+    this.sunLight.intensity = (this._sunBase ?? 1) * beam;
+    this.hemiLight.intensity = (this._hemiBase ?? 0.5) * diffuse;
+    this.scene.environmentIntensity = (this._envBase ?? 1) * diffuse;
+    // The sky shader uses uSunColor for the sun's glow AND for the light on the
+    // cloud deck. With no direct beam there is no bright disc and no lit cloud
+    // top, so this has to follow the beam down or a storm keeps a hot spot in it.
+    if (this._sunColorBase) {
+      this.sky.material.uniforms.uSunColor.value
+        .copy(this._sunColorBase).multiplyScalar(0.10 + 0.90 * beam);
+    }
   }
 
   updateEnvMap() {
