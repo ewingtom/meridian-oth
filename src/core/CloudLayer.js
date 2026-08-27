@@ -232,7 +232,22 @@ void main() {
   // Mip level for the whole ray, computed HERE — before the loop, while control
   // flow is still uniform and a footprint can be reasoned about at all.
   float footprint = max(fpx, (span / fNS) * horiz);
-  float fieldLod = log2(max(1.0, footprint / CLOUD_TEXEL_M));
+  /*
+   * The LOD has to know when the field's SCALE changes.
+   *
+   * Scattered weather tightens the cloud field by up to 2.6x to get cumulus-sized
+   * cells out of it (see cellTighten below). That raises the spatial frequency of
+   * everything sampled from it — but this mip level is computed from the pixel's
+   * world footprint against a FIXED texel size, so it went on blurring for the
+   * old, coarser field and under-filtered the new one by exactly that factor.
+   *
+   * The result was a fine diagonal moire across the whole sky, which survived
+   * going from 16 march steps to 48 (banding energy 1.62 to 1.29 for three times
+   * the cost) because it was never the march — it was the noise lattice beating
+   * against the pixel grid. Scaling a field by k costs log2(k) mip levels.
+   */
+  float lodBias = log2(mix(1.0, 2.6, smoothstep(0.30, 0.62, uCloudCoverage)));
+  float fieldLod = log2(max(1.0, footprint / CLOUD_TEXEL_M)) + lodBias;
   float detailFade = smoothstep(7000.0, 150.0, footprint);
 
   // Sun occlusion, sampled at ONE fixed point on the ray, before the loop.
@@ -324,10 +339,56 @@ void main() {
      * distinguishes them here.
      */
     float cumulus = smoothstep(0.30, 0.62, uCloudCoverage);
+
+    /*
+     * Every cell topped out at the same altitude, so a shallow ray could never
+     * pass OVER one.
+     *
+     * This is what stops the sky having cumulus silhouettes. The deck is a slab
+     * and a tactical camera sits far below it, so a ray at eight to twenty-four
+     * degrees crosses kilometres of slab nearly edge-on. If the slab is uniformly
+     * thick, that ray hits cloud somewhere along almost every path and the
+     * integral averages all the structure away — which is why making the cells
+     * smaller raised tonal spread but produced no edges. Separating cells does
+     * not help when the ray is long enough to cross several of them.
+     *
+     * Real cumulus have wildly different tops: one cell builds to three thousand
+     * metres while its neighbour stops at fifteen hundred. A ray passing at two
+     * thousand goes clean over the second and straight through the first, and
+     * THAT is what puts sky between clouds when you are looking along the deck
+     * rather than up at it.
+     *
+     * The top height is sampled on the UNSHEARED base coordinate, so it belongs
+     * to the cell rather than drifting with altitude the way the shape does.
+     */
+    vec2 uvCell = ((p.xz - uCamPos.xz) + wind) * (0.00026 * 1.9);
+    float topRand = cf_noise(uvCell * 0.9 + 23.0);
+    // FADE the per-cell top out with distance.
+    //
+    // Every other field here goes through cf_shapeLod, which blurs it as the
+    // world-space footprint of a pixel grows. This one was raw cf_noise, and at
+    // eight to fifteen degrees the deck is far enough away that one pixel spans
+    // hundreds of metres of cloud — so it aliased, and drew a herringbone comb
+    // across the sky that no amount of extra march steps touched (16 to 48 steps
+    // moved the banding energy 1.62 to 1.29 for three times the cost, which is
+    // what said the comb was not the march).
+    //
+    // Distant cloud simply loses its per-cell height variation and returns to a
+    // uniform slab, which is what a LOD is supposed to do.
+    float cellTop = mix(1.0, mix(0.40, 1.05, topRand), cumulus * detailFade);
+    float fCell = f / max(0.18, cellTop);
+    // FADE out at the cell top, do not branch on it.
+    //
+    // A hard continue above the cell put a step edge into the march, and with
+    // sixteen steps that quantised straight into visible horizontal banding
+    // across the whole sky — the same terracing this shader's threshold ramp was
+    // rewritten to avoid. The cap has to be C1 like everything else here.
+    float capFade = 1.0 - smoothstep(0.82, 1.02, fCell);
+
     float layered = sin(f * 3.14159);
     layered *= layered;
-    float heaped = smoothstep(0.0, 0.14, f) * (1.0 - smoothstep(0.42, 1.0, f));
-    float prof = mix(layered, heaped, cumulus);
+    float heaped = smoothstep(0.0, 0.14, fCell) * (1.0 - smoothstep(0.42, 1.0, fCell));
+    float prof = mix(layered, heaped, cumulus) * capFade;
     // Shear the field with height.
     //
     // The cloud shape is a 2-D field extruded up the slab, so every sample along
@@ -447,7 +508,27 @@ void main() {
     float sinAlt = clamp(abs(rd.y), 0.0, 1.0);
     lit *= (1.0 + 2.0 * sinAlt) / 3.0;
 
-    float sigma = d * 0.00085;              // extinction per metre
+    /*
+     * The cloud has to be able to reach its own lit colour.
+     *
+     * At 0.00085 per metre, a full-density ray straight up the 1900 m slab
+     * reaches an optical depth of only 1.6, which is 80 percent opacity — and at
+     * fair-weather densities far less. A review measured the consequence
+     * directly: uLitColor is authored at red-over-blue 0.947, and the brightest
+     * pixel in a fair sky renders at 0.737. The cloud never reaches its own lit
+     * colour ANYWHERE, because the blue dome behind it is still showing through
+     * at the densest point on the densest sightline.
+     *
+     * That is why no amount of work on cell size or cell height produced an
+     * edge. A crisp boundary between translucent and slightly-less-translucent
+     * cannot exist. Cloud has to be able to go opaque before its silhouette can
+     * mean anything.
+     *
+     * At 0.0026 the same full-density path reaches 4.9, which is 99 percent —
+     * while thin cloud at a fifth of that density still sits near 60 percent and
+     * stays the wisp it should be.
+     */
+    float sigma = d * 0.0026;               // extinction per metre
     float aStep = 1.0 - exp(-sigma * ds);
     scatter += trans * aStep * lit;
     trans *= 1.0 - aStep;

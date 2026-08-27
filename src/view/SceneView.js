@@ -103,7 +103,30 @@ function _loadAsm(view) {
  * threshold range to map into, inverted.
  */
 function coverageToThreshold(coverage) {
-  return 0.78 - Math.max(0, Math.min(1, coverage)) * 0.62;
+  /*
+   * Not linear, because the deck is not seen from above.
+   *
+   * A tactical camera sits far below the slab and looks along it at eight to
+   * twenty-four degrees, so a ray crosses kilometres of cloud rather than
+   * dropping through it. That turns a modest volumetric density into near-total
+   * cover on screen: measured by ablation, FAIR at a linear threshold of 0.52
+   * filled 94.9 percent of the sky band. A regime named SCATTERED CUMULUS was
+   * covering the sky more completely than BROKEN CLOUD.
+   *
+   * Bending the low end up makes scattered weather genuinely sparse in the
+   * horizontal, which is the only thing that survives a long slant path. The top
+   * end barely moves — overcast and gale were already right, and they are the
+   * two that must stay solid.
+   *
+   *   coverage   linear   now
+   *     0.16      0.681   0.814
+   *     0.42      0.520   0.664
+   *     0.62      0.396   0.509
+   *     0.86      0.247   0.286
+   *     0.95      0.191   0.193
+   */
+  const c = Math.max(0, Math.min(1, coverage));
+  return 0.86 - 0.72 * Math.pow(c, 1.5);
 }
 
 export class SceneView {
