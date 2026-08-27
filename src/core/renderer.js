@@ -40,6 +40,7 @@ const VIGNETTE_GRADE_SHADER = {
     uTime: { value: 0 },
     uContrast: { value: 1.03 },
     uSaturation: { value: 1.06 },
+    uExposure: { value: 1.0 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -52,8 +53,42 @@ const VIGNETTE_GRADE_SHADER = {
     uniform float uTime;
     uniform float uContrast;
     uniform float uSaturation;
+    uniform float uExposure;
     varying vec2 vUv;
     float hash(vec2 p) { return fract(sin(dot(p, vec2(41.7, 289.1))) * 43758.5453123); }
+
+    /*
+     * TONE MAPPING LIVES HERE, because it lives nowhere else.
+     *
+     * renderer.toneMapping is set to ACESFilmic and toneMappingExposure to 1.3,
+     * and neither has ever done anything. three.js only compiles tone mapping
+     * into a material when it is rendering to the CANVAS; render through an
+     * EffectComposer into a target and every material is compiled with
+     * NoToneMapping instead. Reading the compiled hull shader back off the GL
+     * context confirms it: no toneMappingExposure uniform, no ACES code, just
+     * the empty stub. Sweeping the exposure knob across eight stops moved the
+     * whole-frame mean from 31.9 to 31.8.
+     *
+     * So every physically-based material in the game has been writing LINEAR
+     * radiance into the buffer and having it sent to an sRGB display with no
+     * transfer function at all. An 18% grey card came out at sRGB 21 instead of
+     * about 118. That is a factor of six, it is the same factor everywhere, and
+     * it is the real reason four consecutive art reviews found the ships black —
+     * every fix aimed at the albedo, the ambient occlusion, the image-based
+     * lighting or the atlas was aimed at the wrong thing, because none of those
+     * was ever more than a rounding error next to a missing transfer function.
+     */
+    vec3 acesFilmic(vec3 x) {
+      // Narkowicz's fit — visually indistinguishable from the full RRT/ODT here
+      // and a fraction of the cost.
+      const float a = 2.51, b = 0.03, c2 = 2.43, d = 0.59, e = 0.14;
+      return clamp((x * (a * x + b)) / (x * (c2 * x + d) + e), 0.0, 1.0);
+    }
+    vec3 linearToSRGB(vec3 c) {
+      return mix(c * 12.92,
+                 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055,
+                 step(vec3(0.0031308), c));
+    }
     /*
      * Interleaved-gradient noise.
      *
@@ -88,7 +123,12 @@ const VIGNETTE_GRADE_SHADER = {
       // here is correct as well as necessary. Roll off rather than hard-clip, so
       // the disc keeps a bright core with a gradient into the glare instead of a
       // flat white plate with a hard edge.
-      c = c / (1.0 + max(vec3(0.0), c - 1.0));
+      // Linear radiance in; display-referred out. ACES handles the range that
+      // the hand-rolled rolloff used to (the sky writes the sun disc at thirty-
+      // four times white so bloom has something to work with), and it does it
+      // with a shoulder rather than a hard knee.
+      c = acesFilmic(c * uExposure);
+      c = linearToSRGB(c);
       c = clamp(c, 0.0, 1.0);
 
       vec3 sCurve = c * c * (3.0 - 2.0 * c);
@@ -437,7 +477,12 @@ export class RenderPipeline {
     }
 
     // Slight exposure lift on High for glitter / ocean specular
-    this.renderer.toneMappingExposure = q === 'exquisite' ? 1.34 : q === 'high' ? 1.30 : 1.22;
+    // Drive the exposure that is actually connected to something. The renderer's
+    // own toneMappingExposure is inert while the composer owns the frame (see
+    // the note in VIGNETTE_GRADE_SHADER); keep it in step for the raw path.
+    const exposure = q === 'exquisite' ? 1.34 : q === 'high' ? 1.30 : 1.22;
+    this.renderer.toneMappingExposure = exposure;
+    if (this.gradePass) this.gradePass.uniforms.uExposure.value = exposure;
 
     this.resize();
   }

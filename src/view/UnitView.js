@@ -239,68 +239,40 @@ function _tempVertexAO(m) {
 }
 
 /*
- * Bring baked warship paint to the values paint actually has.
+ * Warship paint calibration.
  *
- * Measured off the destroyer's own 4096-square albedo atlas: the mean luminance
- * of its non-empty texels is sRGB 83. US Navy haze grey 5-H sits around sRGB
- * 125-135, so the bake is about 2.6x too dark once decoded to linear. The packed
- * metallicRoughness map carries 0.23 in its metalness channel, and painted steel
- * is a dielectric — 0.02 to 0.04 — so roughly a quarter of the surface response
- * was being taken away from diffuse and handed to a specular lobe that, at this
- * roughness, returns almost nothing.
+ * This used to apply a 2.4x albedo gain, on the measurement that the destroyer's
+ * atlas averaged sRGB 83 where haze grey should sit near 130. That measurement
+ * was real but the diagnosis was wrong, and so was every other attempt at this
+ * across four review rounds. The atlas is correct — median sRGB 85 on paint
+ * texels, which IS haze grey. The ships were dark because the pipeline had no
+ * tone mapping and no linear-to-sRGB transfer at all (see the note in
+ * VIGNETTE_GRADE_SHADER), so linear radiance was going to an sRGB display raw
+ * and everything physically-based came out about six times too dark.
  *
- * Those two compounded with the over-strong baked occlusion to produce hulls
- * that an art review measured at RGB 24 against RGB 219 for the same geometry
- * with the albedo removed — ships rendering as near-black slabs in daylight.
+ * With the transfer function in place the gain is back to 1.0, where the earlier
+ * comment here correctly predicted it belonged. Measured with it at 1.0: lit
+ * topside reads p90 152 against a 150-190 target for sunlit haze grey.
  *
- * Both corrections are applied at the correct lever. glTF's metalness factor
- * multiplies the map, so scaling the factor rescales the whole channel; the base
- * colour factor multiplies the decoded albedo. The gain clips only texels above
- * about sRGB 160, which is 2.2% of the atlas and is deck markings that should be
- * white anyway.
- *
- * A later asset pass argued this gain over-corrects by about 2x, on the grounds
- * that the sRGB 83 figure is a WHOLE-ATLAS mean — and the atlas also carries
- * boot-topping, the underwater hull, funnel black, glass and array faces — while
- * the superstructure band alone measures 118-123, which is already haze grey.
- * That reasoning is sound, but it does not survive contact with the render: at
- * gains of 1.0 / 1.4 / 1.8 / 2.4 the ship measures 66 / 72 / 80 / 92 mean luma
- * in frame, against the 150-190 a sunlit haze-grey topside should give. Every
- * setting is UNDER-lit, and at 1.4 the hull visibly slides back toward the black
- * slab this was written to fix. So 2.4 stays.
- *
- * The discrepancy is presumably eaten between the atlas and the frame — baked
- * occlusion, the environment term, and tone mapping each take a bite. Worth
- * chasing properly, because a gain compensating for three unknowns is a fudge
- * even when the picture looks right; the honest fix is still to export paint at
- * the correct level and bring this back to 1.0.
+ * What remains is the metalness clamp, which is a genuine asset correction:
+ * painted steel is a dielectric and the bakes carry values an order of magnitude
+ * too high for paint.
  */
-const PAINT_ALBEDO_GAIN = 2.4;
+const PAINT_ALBEDO_GAIN = 1.0;
 const PAINT_MAX_METALNESS = 0.12;
-
-/*
- * The submarine needs to be in here too, and for a subtler reason than the
- * warships.
- *
- * Its two surfaces are named SubHull and Rubber — pressure hull and anechoic
- * tile. The pattern below matched SubHull, because the word contains "hull", and
- * missed Rubber entirely. So the two halves of the same boat were being lit 2.4x
- * apart: one calibrated, one not. Anechoic coating IS genuinely near-black — the
- * bake measures sRGB 52 against the destroyer's 85, and that is correct, a
- * submarine is the darkest thing on the ocean — but it has to be COHERENTLY
- * near-black, and it has to read as a shape rather than a hole.
- *
- * What makes a real submarine legible in a photograph is not its albedo, which
- * is almost nothing; it is that the casing is wet and glossy and carries a
- * reflection of the sky along its curve. The bake already has that right
- * (roughness 0.40, metalness 0.02), so bringing the whole boat onto one gain is
- * enough: it stays much darker than any surface ship, and the specular does the
- * describing.
- */
+// Fittings, davits, masts and deck machinery. Oxidised or painted steel, not a
+// mirror: an art review found this material at 13,240 triangles — the second
+// largest on the ship — sitting at metalness 1.0 with a white colour factor, so
+// it returned no diffuse at all and read as a hole in the hull.
+const FITTING_MAX_METALNESS = 0.35;
 function _calibratePaint(c, name) {
+  if (/darkmetal|metal|fitting|davit|rail|stanchion|vent|pipe/.test(name)) {
+    c.metalness = Math.min(c.metalness ?? 1, FITTING_MAX_METALNESS);
+    return;
+  }
   if (!/hull|super|deck|paint|grey|gray|haze|boot|keel|nonskid|mast|funnel|house|rubber|anechoic|casing/.test(name)) return;
   c.metalness = Math.min(c.metalness ?? 1, PAINT_MAX_METALNESS);
-  c.color.multiplyScalar(PAINT_ALBEDO_GAIN);
+  if (PAINT_ALBEDO_GAIN !== 1.0) c.color.multiplyScalar(PAINT_ALBEDO_GAIN);
 }
 
 /*

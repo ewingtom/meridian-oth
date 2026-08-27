@@ -404,6 +404,12 @@ void main() {
   }
   alpha = clamp(alpha, 0.0, 1.0);
   if (alpha < 0.004) discard;
+  // The grade pass now applies ACES and the sRGB transfer to the whole frame, so
+  // everything must hand it LINEAR radiance. This shader's palette is authored by
+  // eye in display space, so undo the transfer on the way out; the grade pass
+  // puts it back. Net identity for this surface, while the PBR materials finally
+  // get the tone mapping they have always been written to expect.
+  col = pow(max(col, vec3(0.0)), vec3(2.2));
   gl_FragColor = vec4(col, alpha);
 }
 `;

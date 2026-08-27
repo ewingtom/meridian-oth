@@ -358,9 +358,23 @@ float noise(vec2 p) {
   vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
 }
+/*
+ * Rotate each octave, do not merely scale it.
+ *
+ * noise() interpolates a hash on an axis-aligned integer lattice, so its
+ * structure is axis-aligned too. Scaling by 2.02 between octaves keeps every
+ * one of them on the SAME axes, and their features stack up into visible
+ * rectangular cells — which is exactly what the whitecap foam looked like once
+ * the tone mapping was fixed and the sea was finally bright enough to show it:
+ * hard blocky patches rather than breaking crests.
+ *
+ * A rotation by a non-special angle between octaves decorrelates them, and the
+ * lattice stops being able to reinforce itself. It costs two multiplies.
+ */
+const mat2 FBM_ROT = mat2(0.8253356, -0.5646425, 0.5646425, 0.8253356);  // ~34.4 deg
 float fbm(vec2 p) {
   float v = 0.0, amp = 0.5;
-  for (int i = 0; i < 3; i++) { v += amp * noise(p); p *= 2.02; amp *= 0.5; }
+  for (int i = 0; i < 3; i++) { v += amp * noise(p); p = FBM_ROT * p * 2.02; amp *= 0.5; }
   return v;
 }
 
@@ -397,12 +411,17 @@ vec3 noised(vec2 p) {
 /** Three-octave fbm carrying its gradient. Matches fbm() term for term. */
 vec3 fbmd(vec2 p) {
   vec3 acc = vec3(0.0);
-  float amp = 0.5, freq = 1.0;
+  float amp = 0.5;
+  vec2 q = p;
+  mat2 rot = mat2(1.0, 0.0, 0.0, 1.0);
   for (int i = 0; i < 3; i++) {
-    vec3 n = noised(p * freq);
+    vec3 n = noised(q);
     acc.x += amp * n.x;
-    acc.yz += amp * freq * n.yz;
-    freq *= 2.02; amp *= 0.5;
+    // Chain-rule the accumulated rotation and scale back onto the gradient.
+    acc.yz += amp * (n.y * vec2(rot[0][0], rot[1][0]) + n.z * vec2(rot[0][1], rot[1][1]));
+    q = FBM_ROT * q * 2.02;
+    rot = FBM_ROT * rot * 2.02;
+    amp *= 0.5;
   }
   return acc;
 }
@@ -900,7 +919,15 @@ void main() {
   // Douglas 5 is visibly flecked and a Douglas 8 is a third foam. Reaching the
   // low limit sooner, and lower, puts breaking crests on a rough sea without
   // painting the calm — sea state 3 still measures clean.
-  float breakLimit = mix(0.92, 0.18, clamp((uWaveAmp - 0.10) / 0.90, 0.0, 1.0));
+  // Third calibration, and the first one done against a correctly exposed frame.
+  //
+  // The previous two were tuned against a pipeline with no tone mapping and no
+  // sRGB transfer, where everything rendered about six times too dark — so foam
+  // that measured "barely visible" was actually near-white once the transfer
+  // function was put back, and a gale came out as hard blocky patches of blown
+  // highlight. Pulled back, with softer thresholds so the value-noise lattice
+  // underneath cannot draw its own grid at high contrast.
+  float breakLimit = mix(0.95, 0.32, clamp((uWaveAmp - 0.10) / 0.90, 0.0, 1.0));
   float crest = smoothstep(breakLimit, breakLimit + 0.30, vFoamFactor);
 
   // DETAIL BY DISTANCE.
@@ -932,11 +959,11 @@ void main() {
     // Centred on 0.44 now, with a spread that leaves the product low on average
     // and full where all three coincide — which is what breaking looks like:
     // discrete patches, not a continuous ribbon along every crest.
-    capPatch = smoothstep(0.35, 0.52, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
-      * smoothstep(0.32, 0.50, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
+    capPatch = smoothstep(0.38, 0.60, fbm(vWorldPos.xz * 0.055 + uTime * 0.035))
+      * smoothstep(0.36, 0.58, fbm(vWorldPos.xz * 0.42 - uTime * 0.13))
       // A third, very large scale: whole areas of sea that are simply breaking
       // more than the areas next to them.
-      * (0.40 + 0.60 * smoothstep(0.34, 0.52, fbm(vWorldPos.xz * 0.0022 + 91.0)));
+      * (0.30 + 0.70 * smoothstep(0.36, 0.58, fbm(vWorldPos.xz * 0.0022 + 91.0)));
     fizz = 0.45 + 0.55 * smoothstep(0.35, 0.85, noise(vWorldPos.xz * 3.2 - uTime * 0.9));
     // Streaks of dissipated foam lying in the troughs downwind of a break.
     // Same calibration problem: 0.55 to 1.0 is unreachable for a field that tops
@@ -1094,6 +1121,12 @@ void main() {
   color = mix(color, mix(uDeepColor * 0.85, uHorizonColor * 0.94, airMass), edgeFade * 0.7);
   color += (hash(gl_FragCoord.xy * 0.15 + uTime) - 0.5) * (2.4 / 255.0);
 
+  // The grade pass now applies ACES and the sRGB transfer to the whole frame, so
+  // everything must hand it LINEAR radiance. This shader's palette is authored by
+  // eye in display space, so undo the transfer on the way out; the grade pass
+  // puts it back. Net identity for this surface, while the PBR materials finally
+  // get the tone mapping they have always been written to expect.
+  color = pow(max(color, vec3(0.0)), vec3(2.2));
   gl_FragColor = vec4(color, 1.0);
 }
 `;
@@ -1353,7 +1386,9 @@ void main() {
   color = mix(color, vec3(0.72, 0.78, 0.81), capsFar * 0.15);
 
   float dither = (hash(gl_FragCoord.xy * 0.17 + uTime * 0.31) - 0.5) * (2.2 / 255.0);
-  gl_FragColor = vec4(color + dither, 1.0);
+  // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
+  // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.
+  gl_FragColor = vec4(pow(max(color + dither, vec3(0.0)), vec3(2.2)), 1.0);
 }
 `;
 

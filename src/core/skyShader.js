@@ -245,7 +245,9 @@ export const SkyShader = {
       // and it was the single most-cited defect in the art review. One LSB is
       // exactly enough to break an 8-bit ramp and is invisible.
       color += (ignDither(gl_FragCoord.xy, uTime * 7.0) - 0.5) * (1.0 / 255.0);
-      gl_FragColor = vec4(color, 1.0);
+      // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
+  // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.
+  gl_FragColor = vec4(pow(max(color, vec3(0.0)), vec3(2.2)), 1.0);
     }
   `,
 };

@@ -210,7 +210,9 @@ void main() {
   float air = 1.0 - exp(-dist * (3.912 / max(2000.0, uVisibility)) * 0.62);
   vec3 color = mix(lit, uHorizonColor * 0.97, clamp(air, 0.0, 0.96));
   color += (ihash(gl_FragCoord.xy * 0.21 + uTime) - 0.5) * (2.0 / 255.0);
-  gl_FragColor = vec4(color, 1.0);
+  // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
+  // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.
+  gl_FragColor = vec4(pow(max(color, vec3(0.0)), vec3(2.2)), 1.0);
 }
 `;
 
