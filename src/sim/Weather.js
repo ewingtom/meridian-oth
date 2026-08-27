@@ -33,7 +33,10 @@ const MIN = 60;
 // up-over-horizon ratio of 0.82 where the standard wants 2.07. I made that worse
 // while fixing the overall level, by darkening the zeniths.
 //
-// The pairs below sit at a linear zenith/horizon ratio near 3. Haze still
+// The pairs below sit at a linear zenith/horizon ratio near 3, at a level that
+// keeps a gale darker than an overcast overall — the first attempt at this held
+// the ratio but raised the level, and turned the gale sky into the brightest of
+// the four again. Haze still
 // brightens the last few degrees above the sea; that comes from the aerial
 // perspective in the ocean and sky shaders, not from the dome colours.
 const REGIMES = [
@@ -55,12 +58,12 @@ const REGIMES = [
   {
     id: 'OVERCAST', name: 'OVERCAST — REDUCED VISIBILITY',
     seaState: 4.5, coverage: 0.86, visNm: 7, rain: 0.18,
-    zenith: 0x9aa6b1, horizon: 0x5c656d, fog: 0x6b747c, weight: 1.0,
+    zenith: 0x7c8894, horizon: 0x474f57, fog: 0x59626a, weight: 1.0,
   },
   {
     id: 'GALE', name: 'GALE — HEAVY SEA, SENSORS DEGRADED',
     seaState: 5.6, coverage: 0.95, visNm: 3.5, rain: 0.55,
-    zenith: 0x8a95a0, horizon: 0x525a61, fog: 0x5d666d, weight: 0.55,
+    zenith: 0x69737d, horizon: 0x3d444b, fog: 0x4a525a, weight: 0.55,
   },
 ];
 

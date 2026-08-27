@@ -523,7 +523,8 @@ export class SceneView {
         - u.uCirrus.value) * k;
       // The deck has to go out with the sun; it is lit, not self-luminous.
       this.clouds?.setDaylight(this.sky.dayFactor ?? 1,
-        this.sky.sky.material.uniforms.uHorizonColor.value);
+        this.sky.sky.material.uniforms.uHorizonColor.value,
+        this.sky._overcast ?? 0);
       this._wxZen = this._wxZen || new THREE.Color(s.zenith);
       this._wxHor = this._wxHor || new THREE.Color(s.horizon);
       this._wxFog = this._wxFog || new THREE.Color(s.fog);

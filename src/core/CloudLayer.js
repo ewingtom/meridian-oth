@@ -394,6 +394,32 @@ void main() {
     vec3 lit = mix(uShadowColor, uLitColor, sunT * (0.28 + 0.72 * powder));
     lit = mix(lit * 0.72, lit, mix(0.30, 1.0, f));
 
+    /*
+     * Overhead you see through the least cloud, so an overcast is brightest at
+     * the zenith and dimmest at the horizon.
+     *
+     * CIE S 011 / ISO 15469 gives the standard overcast sky as
+     *   L(theta) = L_zenith * (1 + 2 sin theta) / 3
+     * a three-to-one ratio from zenith to horizon. The deck had no view-angle
+     * term at all, so once coverage saturated it shaded to one flat value in
+     * every direction and the measured up-over-horizon ratio came out at 0.82 —
+     * slightly INVERTED, where the standard asks for about 2.
+     *
+     * Note this is the deck, not the dome behind it. Under a real overcast the
+     * deck is the whole sky, so the gradient has to live here; correcting the
+     * dome's zenith and horizon colours does nothing when a solid ceiling is
+     * drawn over the top of them.
+     */
+    // At full strength, not gated on coverage. The ramp belongs to the cloud's
+    // own radiance, and a pixel with no cloud in front of it receives no cloud
+    // contribution to scale — so gating it on how overcast the sky is only
+    // weakened it where it matters. Gated at deckVary it ran at 44 percent and
+    // moved the measured ratio from 0.82 to 1.06 against a target of 1.63 for
+    // that elevation span. The term only ever darkens toward the horizon: it is
+    // 1.0 at the zenith by construction, so nothing gets brighter.
+    float sinAlt = clamp(abs(rd.y), 0.0, 1.0);
+    lit *= (1.0 + 2.0 * sinAlt) / 3.0;
+
     float sigma = d * 0.00085;              // extinction per metre
     float aStep = 1.0 - exp(-sigma * ds);
     scatter += trans * aStep * lit;
@@ -528,12 +554,18 @@ export class CloudLayer {
   // itself, and against a dark sky it still reads as a slightly lighter mass.
   // So take the level almost all the way down and let what is left settle
   // toward the colour of the sky it is sitting in front of.
-  setDaylight(day, nightSky) {
+  // overcast: 0 for scattered cumulus, 1 for a solid storm deck. A thick deck's
+  // underside is dark slate — the thing that makes a gale sky read as a gale is
+  // that the ceiling is DARK. uShadowColor was a fixed light grey chosen so an
+  // overcast would not vanish into the zenith behind it, which is right for a
+  // stratus layer and much too bright for a storm.
+  setDaylight(day, nightSky, overcast = 0) {
     const u = this.material.uniforms;
-    const k = 0.05 + 0.95 * day;
+    const oc = Math.max(0, Math.min(1, overcast));
+    const k = (0.05 + 0.95 * day);
     const n = 1 - day;
-    u.uLitColor.value.copy(this._litBase).multiplyScalar(k);
-    u.uShadowColor.value.copy(this._shadowBase).multiplyScalar(k);
+    u.uLitColor.value.copy(this._litBase).multiplyScalar(k * (1 - 0.30 * oc));
+    u.uShadowColor.value.copy(this._shadowBase).multiplyScalar(k * (1 - 0.46 * oc));
     if (nightSky) {
       u.uLitColor.value.lerp(nightSky, n * 0.55);
       u.uShadowColor.value.lerp(nightSky, n * 0.70);
