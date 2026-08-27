@@ -526,10 +526,29 @@ void main() {
   // evaluations on every water pixel in the frame to compute five fields that do
   // not depend on which ship is being considered at all. That is what made the
   // game lag. They are functions of world position and time; hoist them.
-  float nLace   = smoothstep(0.3, 0.88, fbm(vWorldPos.xz * 0.55 + uTime * 0.4));
-  float nStreak = smoothstep(0.5, 0.95, fbm(vWorldPos.xz * 1.4 - uTime * 0.2));
-  float nChurn  = fbm(vWorldPos.xz * 1.15 + uTime * 0.9);
-  float nRefl   = fbm(vWorldPos.xz * 0.09 + uTime * 0.13);
+  // ...but only where a hull can actually use them.
+  //
+  // All four of these feed wake foam, the churn collar and a ship's reflection.
+  // They were hoisted out of the per-hull loop so they are evaluated once rather
+  // than once per ship — correct — but they were still evaluated on EVERY water
+  // pixel in the frame, and in any wide shot almost none of the sea is within a
+  // kilometre of a ship. Four field lookups on most of the screen, discarded.
+  //
+  // A handful of squared-distance tests against the wake slots costs a fraction
+  // of one lookup and skips all four.
+  bool nearAnyHull = false;
+  for (int i = 0; i < NUM_WAKES; i++) {
+    if (uWakeDim[i].w < 0.5) continue;
+    vec2 dHull = vWorldPos.xz - uWakePos[i].xy;
+    if (dot(dHull, dHull) < 1000000.0) nearAnyHull = true;
+  }
+  float nLace = 0.0, nStreak = 0.0, nChurn = 0.0, nRefl = 0.0;
+  if (nearAnyHull) {
+    nLace   = smoothstep(0.3, 0.88, fbm(vWorldPos.xz * 0.55 + uTime * 0.4));
+    nStreak = smoothstep(0.5, 0.95, fbm(vWorldPos.xz * 1.4 - uTime * 0.2));
+    nChurn  = fbm(vWorldPos.xz * 1.15 + uTime * 0.9);
+    nRefl   = fbm(vWorldPos.xz * 0.09 + uTime * 0.13);
+  }
   float wakeTrough = 0.0;
   float nearShipMax = 0.0;
   vec3 hullRefl = vec3(0.0);
