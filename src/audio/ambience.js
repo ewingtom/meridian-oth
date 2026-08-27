@@ -124,15 +124,29 @@ export function startEngineHum(engine, rpmFraction = 0.3) {
   master.connect(engine.ambienceBus);
 
   const rpmToFund = (r) => lerp(36, 95, clamp01(r));
-  const rpmToCutoff = (r) => lerp(220, 1500, clamp01(r));
+  // 1500 Hz is well into the buzz band for a sawtooth-derived tone; even on
+  // triangles this is an engine heard through steel, so it stays low.
+  const rpmToCutoff = (r) => lerp(180, 620, clamp01(r));
 
+  /*
+   * TRIANGLE, not sawtooth.
+   *
+   * A sawtooth carries every harmonic at 1/n, so a 36-95 Hz fundamental puts
+   * strong energy right through the range the ear hears as buzz. A triangle has
+   * only odd harmonics and they fall off at 1/n squared, which is a rumble.
+   * Marine diesels and gas turbines are heard through a hull; what reaches you
+   * is the low end, not the edge.
+   */
   const fundamental = ctx.createOscillator();
-  fundamental.type = "sawtooth";
+  fundamental.type = "triangle";
   fundamental.frequency.value = rpmToFund(rpmFraction);
 
+  // 2.01x against a fundamental that already has its own 2nd harmonic beats at
+  // about one hertz, which is heard as a rough warble on top of the buzz. Move
+  // it off the octave so it thickens rather than beats.
   const detuned = ctx.createOscillator();
-  detuned.type = "sawtooth";
-  detuned.frequency.value = rpmToFund(rpmFraction) * 2.01;
+  detuned.type = "triangle";
+  detuned.frequency.value = rpmToFund(rpmFraction) * 1.49;
 
   const sub = ctx.createOscillator();
   sub.type = "sine";
@@ -143,7 +157,10 @@ export function startEngineHum(engine, rpmFraction = 0.3) {
   const toneFilter = ctx.createBiquadFilter();
   toneFilter.type = "lowpass";
   toneFilter.frequency.value = rpmToCutoff(rpmFraction);
-  toneFilter.Q.value = 1.4;
+  // Q 1.4 is a resonant peak sitting exactly on the cutoff, so it was boosting
+  // the harmonics the filter was there to remove. A room-tone filter wants no
+  // resonance at all.
+  toneFilter.Q.value = 0.5;
 
   const toneGain = ctx.createGain();
   toneGain.gain.value = lerp(0.4, 0.65, rpmFraction);

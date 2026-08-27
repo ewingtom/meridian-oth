@@ -55,12 +55,15 @@ export class GameAudio {
     if (!ctx) return;
     const g = ctx.createGain();
     g.gain.value = 0.0;
+    // Triangle, not sawtooth: a 58 Hz saw puts its 2nd and 3rd harmonics at 116
+    // and 174 Hz, straight through the 220 Hz lowpass below, which is a buzz
+    // rather than the hum this is meant to be.
     const hum = ctx.createOscillator();
-    hum.type = 'sawtooth';
+    hum.type = 'triangle';
     hum.frequency.value = 58;
     const humG = ctx.createGain(); humG.gain.value = 0.035;
     const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass'; lp.frequency.value = 220; lp.Q.value = 0.6;
+    lp.type = 'lowpass'; lp.frequency.value = 150; lp.Q.value = 0.4;
     hum.connect(humG).connect(lp).connect(g);
 
     // Fan noise
