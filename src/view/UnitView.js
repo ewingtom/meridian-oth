@@ -758,7 +758,17 @@ export class UnitView {
       // in the map. Generating them again on top produces a double image. Keep
       // only the wet band, which is dynamic and cannot be baked.
       const baked = !!m.map || m._baked;
-      m.onBeforeCompile = (shader) => {
+      // CHAIN, do not replace.
+      //
+      // _tempVertexAO above installs its own onBeforeCompile to lift the baked
+      // occlusion toward white. Assigning a fresh handler here threw that away
+      // silently — the compiled shader had no colour injection at all — so the
+      // AO fix written to cure the black-slab hulls has never once run on any
+      // textured asset. An art review caught it by inspecting the compiled
+      // shader source, which is the only way this kind of thing shows up.
+      const prevOBC = m.onBeforeCompile;
+      m.onBeforeCompile = (shader, renderer) => {
+        prevOBC?.call(m, shader, renderer);
         shader.uniforms.uSurfSeed = { value: rustSeed };
         shader.uniforms.uSurfHull = { value: isHull ? 1 : 0 };
         shader.uniforms.uSurfBaked = { value: baked ? 1 : 0 };
