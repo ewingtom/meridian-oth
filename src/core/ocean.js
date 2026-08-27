@@ -452,7 +452,16 @@ void main() {
   // Water reflects less than a mirror and the sea's own roughness blurs and dims
   // what comes back. Reflecting the sky at full brightness is what produced the
   // hard pale ribbons on every wave face.
-  reflColor = mix(reflColor * 0.82, uHorizonColor * 0.66, 0.28);
+  // Dimmed, but not extinguished.
+  //
+  // At a grazing angle Fresnel is near one, so distant water is almost entirely
+  // reflection — that is why the sea lightens toward the horizon and takes the
+  // sky's colour. Sampled down the centre of a frame, the sky read (68,110,152)
+  // and the water below it (0,18,50): the reflection was being scaled so far
+  // down that the sea never approached the sky at any distance. An art review
+  // called the result flat and red-starved, and the red channel was in fact
+  // clipping to exactly zero across the whole ocean.
+  reflColor = mix(reflColor * 0.94, uHorizonColor * 0.86, 0.24);
 
   float depthMix = clamp(dot(N, vec3(0.0,1.0,0.0)), 0.0, 1.0);
   vec3 waterColor = mix(uDeepColor, uShallowColor, pow(depthMix, 2.4) * 0.55);
@@ -1274,8 +1283,8 @@ export class OceanField {
       uSunDirection: { value: sunDirection.clone() },
       uSunColor: { value: new THREE.Color(0xfff0d8) },
       uEnvMap: { value: null },
-      uDeepColor: { value: new THREE.Color(0x0a2f4e) },
-      uShallowColor: { value: new THREE.Color(0x12496b) },
+      uDeepColor: { value: new THREE.Color(0x123a55) },
+      uShallowColor: { value: new THREE.Color(0x1d5878) },
       uFogColor: { value: new THREE.Color(0xa8bcc8) },
       uFogDensity: { value: 0.00095 },
       uWaveAmp: { value: 1.0 },
