@@ -201,6 +201,9 @@ export class SceneView {
   }
 
   setQuality(q) {
+    // Hand-authored shaders invert the grade pass's ACES so their palettes round
+    // trip exactly; they need the same exposure the grade pass uses.
+    this._syncGradeExposure();
     // Cloud march depth. Safe to vary now that the count is a UNIFORM rather
     // than a per-pixel value — a count that changes per draw cannot draw the
     // contour lines a per-pixel one did.
@@ -217,6 +220,17 @@ export class SceneView {
     // its own linear curve while the weather loop applied a different one, so
     // the sea had two unrelated ideas of what a given sea state looked like.
     this.ocean.setSeaState(ss);
+  }
+
+  /** Push the grade pass's exposure into every shader that inverts ACES. */
+  _syncGradeExposure() {
+    const e = this.pipeline?.gradePass?.uniforms?.uExposure?.value ?? 1.3;
+    const set = (m) => { if (m?.uniforms?.uGradeExposure) m.uniforms.uGradeExposure.value = e; };
+    set(this.ocean?.mesh?.material);
+    set(this.ocean?.skirtMat);
+    set(this.sky?.sky?.material);
+    set(this.clouds?.mesh?.material);
+    for (const it of (this.islands || [])) if (it.mesh) set(it.mesh.material);
   }
 
   setWeatherLook({ fog, zenith, horizon, coverage, rain = 0, exposure }) {

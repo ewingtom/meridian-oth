@@ -90,6 +90,34 @@ float layerDepth(float dist, float lo, float hi, float H) {
   return dist * (H / dh) * (exp(-lo / H) - exp(-hi / H));
 }
 
+/*
+ * Exact inverse of the ACES fit the grade pass applies.
+ *
+ * This shader's palette is authored by eye, in display space. The grade pass
+ * applies ACES and the sRGB transfer to the whole frame, so this surface has to
+ * hand it something that comes back out looking as authored.
+ *
+ * The first attempt used pow(colour, 2.2), assuming linearise -> ACES -> sRGB
+ * round-trips. It does not: ACES sits in the middle and compresses midtones, so
+ * these surfaces were darkened TWICE and the darkest channel crushed hardest.
+ * Measured on near water at a low eyepoint, red came out at exactly 0 — the
+ * "foreground red channel hard-clipped to zero" an art review reported, and why
+ * a low camera saw a near-black sea that looked correct from higher up.
+ *
+ * ACES is y = x(ax+b) / (x(cx+d)+e), so inverting is a quadratic:
+ *   (yc - a)x^2 + (yd - b)x + ye = 0.  One sqrt, and the round trip is identity.
+ */
+uniform float uGradeExposure;
+vec3 acesInverse(vec3 y) {
+  const float ia = 2.51, ib = 0.03, ic = 2.43, id = 0.59, ie = 0.14;
+  y = clamp(y, 0.0, 0.9999);
+  vec3 A = y * ic - ia;
+  vec3 B = y * id - ib;
+  vec3 C = y * ie;
+  vec3 disc = max(B * B - 4.0 * A * C, vec3(0.0));
+  return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
+}
+
 void main() {
   vec3 toCam = uCamPos - vWorldPos;
   float dist = length(toCam);
@@ -409,7 +437,7 @@ void main() {
   // eye in display space, so undo the transfer on the way out; the grade pass
   // puts it back. Net identity for this surface, while the PBR materials finally
   // get the tone mapping they have always been written to expect.
-  col = pow(max(col, vec3(0.0)), vec3(2.2));
+  col = acesInverse(col) / uGradeExposure;
   gl_FragColor = vec4(col, alpha);
 }
 `;
@@ -429,6 +457,7 @@ export class CloudLayer {
         uCloudCoverage: sharedUniforms.uCloudCoverage,
         uCloudField: sharedUniforms.uCloudField,
         uCloudSteps: { value: 16.0 },
+        uGradeExposure: { value: 1.3 },
         uCloudiness: sharedUniforms.uCloudiness,
         uHorizonColor: sharedUniforms.uHorizonColor,
         uVisibility: sharedUniforms.uVisibility,

@@ -14,6 +14,7 @@ export const SkyShader = {
     uHorizonColor: { value: new Color(0xaecbdd) },
     uSunColor: { value: new Color(0xfff2d6) },
     uCloudCoverage: { value: 0.40 },
+    uGradeExposure: { value: 1.3 },
     uCloudField: { value: null },
     uCloudiness: { value: 0.95 },
     uCloudColorLit: { value: new Color(0xf4f7fb) },
@@ -127,7 +128,35 @@ export const SkyShader = {
       return clamp((d - t) / (1.0 - t), 0.0, 1.0);
     }
 
-    void main() {
+    /*
+ * Exact inverse of the ACES fit the grade pass applies.
+ *
+ * This shader's palette is authored by eye, in display space. The grade pass
+ * applies ACES and the sRGB transfer to the whole frame, so this surface has to
+ * hand it something that comes back out looking as authored.
+ *
+ * The first attempt used pow(colour, 2.2), assuming linearise -> ACES -> sRGB
+ * round-trips. It does not: ACES sits in the middle and compresses midtones, so
+ * these surfaces were darkened TWICE and the darkest channel crushed hardest.
+ * Measured on near water at a low eyepoint, red came out at exactly 0 — the
+ * "foreground red channel hard-clipped to zero" an art review reported, and why
+ * a low camera saw a near-black sea that looked correct from higher up.
+ *
+ * ACES is y = x(ax+b) / (x(cx+d)+e), so inverting is a quadratic:
+ *   (yc - a)x^2 + (yd - b)x + ye = 0.  One sqrt, and the round trip is identity.
+ */
+uniform float uGradeExposure;
+vec3 acesInverse(vec3 y) {
+  const float ia = 2.51, ib = 0.03, ic = 2.43, id = 0.59, ie = 0.14;
+  y = clamp(y, 0.0, 0.9999);
+  vec3 A = y * ic - ia;
+  vec3 B = y * id - ib;
+  vec3 C = y * ie;
+  vec3 disc = max(B * B - 4.0 * A * C, vec3(0.0));
+  return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
+}
+
+void main() {
       vec3 dir = normalize(vWorldPosition - cameraPosition);
       float elevation = dir.y;
 
@@ -247,7 +276,7 @@ export const SkyShader = {
       color += (ignDither(gl_FragCoord.xy, uTime * 7.0) - 0.5) * (1.0 / 255.0);
       // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
   // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.
-  gl_FragColor = vec4(pow(max(color, vec3(0.0)), vec3(2.2)), 1.0);
+  gl_FragColor = vec4(acesInverse(color) / uGradeExposure, 1.0);
     }
   `,
 };

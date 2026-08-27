@@ -299,6 +299,7 @@ void main() {
 `;
 
 export const OCEAN_FRAGMENT = `
+
 #include <common>
 #include <packing>
 // WebGLRenderer sets this per-object automatically, but only declares it for its
@@ -452,6 +453,34 @@ float opticalDepth(float dist, float hA, float hB, float k) {
   float aerosol = k * layerDepth(dist, lo, hi, 1250.0);
   float rayleigh = 1.15e-5 * layerDepth(dist, lo, hi, 8400.0);
   return aerosol + rayleigh;
+}
+
+/*
+ * Exact inverse of the ACES fit the grade pass applies.
+ *
+ * This shader's palette is authored by eye, in display space. The grade pass
+ * applies ACES and the sRGB transfer to the whole frame, so this surface has to
+ * hand it something that comes back out looking as authored.
+ *
+ * The first attempt used pow(colour, 2.2), assuming linearise -> ACES -> sRGB
+ * round-trips. It does not: ACES sits in the middle and compresses midtones, so
+ * these surfaces were darkened TWICE and the darkest channel crushed hardest.
+ * Measured on near water at a low eyepoint, red came out at exactly 0 — which is
+ * the "foreground red channel hard-clipped to zero" an art review reported, and
+ * why a low camera saw a near-black sea that looked correct from higher up.
+ *
+ * ACES is y = x(ax+b) / (x(cx+d)+e), so inverting is a quadratic:
+ *   (yc - a)x^2 + (yd - b)x + ye = 0.  One sqrt, round trip is identity.
+ */
+uniform float uGradeExposure;
+vec3 acesInverse(vec3 y) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  y = clamp(y, 0.0, 0.9999);
+  vec3 A = y * c - a;
+  vec3 B = y * d - b;
+  vec3 C = y * e;
+  vec3 disc = max(B * B - 4.0 * A * C, vec3(0.0));
+  return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
 }
 
 void main() {
@@ -1126,7 +1155,7 @@ void main() {
   // eye in display space, so undo the transfer on the way out; the grade pass
   // puts it back. Net identity for this surface, while the PBR materials finally
   // get the tone mapping they have always been written to expect.
-  color = pow(max(color, vec3(0.0)), vec3(2.2));
+  color = acesInverse(color) / uGradeExposure;
   gl_FragColor = vec4(color, 1.0);
 }
 `;
@@ -1260,6 +1289,34 @@ float opticalDepth(float dist, float hA, float hB, float k) {
   return aerosol + rayleigh;
 }
 
+/*
+ * Exact inverse of the ACES fit the grade pass applies.
+ *
+ * This shader's palette is authored by eye, in display space. The grade pass
+ * applies ACES and the sRGB transfer to the whole frame, so this surface has to
+ * hand it something that comes back out looking as authored.
+ *
+ * The first attempt used pow(colour, 2.2), assuming linearise -> ACES -> sRGB
+ * round-trips. It does not: ACES sits in the middle and compresses midtones, so
+ * these surfaces were darkened TWICE and the darkest channel crushed hardest.
+ * Measured on near water at a low eyepoint, red came out at exactly 0 — which is
+ * the "foreground red channel hard-clipped to zero" an art review reported, and
+ * why a low camera saw a near-black sea that looked correct from higher up.
+ *
+ * ACES is y = x(ax+b) / (x(cx+d)+e), so inverting is a quadratic:
+ *   (yc - a)x^2 + (yd - b)x + ye = 0.  One sqrt, round trip is identity.
+ */
+uniform float uGradeExposure;
+vec3 acesInverse(vec3 y) {
+  const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
+  y = clamp(y, 0.0, 0.9999);
+  vec3 A = y * c - a;
+  vec3 B = y * d - b;
+  vec3 C = y * e;
+  vec3 disc = max(B * B - 4.0 * A * C, vec3(0.0));
+  return max((-B - sqrt(disc)) / (2.0 * A), vec3(0.0));
+}
+
 void main() {
   // Cut a hole for the detailed wave field.
   //
@@ -1388,7 +1445,7 @@ void main() {
   float dither = (hash(gl_FragCoord.xy * 0.17 + uTime * 0.31) - 0.5) * (2.2 / 255.0);
   // Hand the grade pass LINEAR radiance — it now applies ACES and the sRGB
   // transfer to the whole frame. See the note in VIGNETTE_GRADE_SHADER.
-  gl_FragColor = vec4(pow(max(color + dither, vec3(0.0)), vec3(2.2)), 1.0);
+  gl_FragColor = vec4(acesInverse(color + dither) / uGradeExposure, 1.0);
 }
 `;
 
@@ -1418,6 +1475,7 @@ export class OceanField {
       uWaveAmp: { value: 1.0 },
       uIsland: { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] },
       uDetailLevel: { value: 0.85 },
+      uGradeExposure: { value: 1.3 },
       uRain: { value: 0 },
       uVisibility: { value: 46000 },
       uHorizonColor: { value: new THREE.Color(0xa8c6da) },
