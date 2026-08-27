@@ -19,6 +19,8 @@ export const SkyShader = {
     uCloudiness: { value: 0.95 },
     // High cirrus, separately from the deck. See the note at the mix below.
     uCirrus: { value: 0.30 },
+    // 0 for a clear sky, 1 for a solid deck. Selects the gradient shape.
+    uOvercast: { value: 0.0 },
     uCloudColorLit: { value: new Color(0xf4f7fb) },
     uCloudColorShadow: { value: new Color(0x394b60) },
     uTime: { value: 0 },
@@ -41,6 +43,7 @@ export const SkyShader = {
     uniform float uCloudCoverage;
     uniform float uCloudiness;
     uniform float uCirrus;
+    uniform float uOvercast;
     uniform vec3 uCloudColorLit;
     uniform vec3 uCloudColorShadow;
     uniform float uTime;
@@ -189,7 +192,24 @@ void main() {
       // wide shot in the game — the dither WAS the artefact it was added to
       // prevent. Applying it to the mixed result instead keeps it at the one
       // least-significant bit it was always supposed to be, everywhere.
-      float skyMix = pow(clamp(elevation, 0.0, 1.0), 0.38);
+      /*
+       * A clear sky and an overcast have different gradient SHAPES, not just
+       * different colours at the ends.
+       *
+       * The 0.38 exponent was tuned on a clear sky, where the deep zenith blue
+       * arrives quickly above the horizon. Applied to an overcast it puts most
+       * of the zenith colour in low down, which flattens the profile — measured
+       * over the band a tactical camera can actually see (2-8 degrees against
+       * 15-24), an overcast came out at 0.90 where CIE asks for about 1.42.
+       *
+       * CIE S 011 gives the standard overcast as L(theta) = L_z (1 + 2 sin
+       * theta) / 3. Written as a mix fraction from the horizon value (1/3) to the
+       * zenith value (1), that is
+       *     ((1 + 2s)/3 - 1/3) / (1 - 1/3)  =  s
+       * exactly — so for an overcast the mix fraction IS sin(elevation), which
+       * is dir.y, which is an exponent of 1.0. No fitting required.
+       */
+      float skyMix = pow(clamp(elevation, 0.0, 1.0), mix(0.38, 1.0, uOvercast));
       skyMix += (ignDither(gl_FragCoord.xy, uTime) - 0.5) * 0.0055;
       vec3 sky = mix(uHorizonColor, uZenithColor, clamp(skyMix, 0.0, 1.0));
 

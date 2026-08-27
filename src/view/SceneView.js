@@ -521,6 +521,13 @@ export class SceneView {
       // through stratus. This uniform used to be pinned at 0.95 for ever.
       u.uCirrus.value += ((0.34 * (1 - THREE.MathUtils.smoothstep(s.coverage, 0.42, 0.88)))
         - u.uCirrus.value) * k;
+      // A clear sky and an overcast have different gradient shapes; see skyShader.
+      // window.__OC is a test override. Uniforms cannot be poked directly from the
+      // console: grab() runs a full frame update and this line reasserts the
+      // weather-driven value, which silently reverted every such probe.
+      const ocTarget = (typeof window !== 'undefined' && window.__OC != null)
+        ? window.__OC : (this.sky._overcast ?? 0);
+      u.uOvercast.value += (ocTarget - u.uOvercast.value) * k;
       // The deck has to go out with the sun; it is lit, not self-luminous.
       this.clouds?.setDaylight(this.sky.dayFactor ?? 1,
         this.sky.sky.material.uniforms.uHorizonColor.value,
@@ -546,9 +553,27 @@ export class SceneView {
       const day = this.sky.dayFactor ?? 1;
       const base = this.sky.baseZenith, baseH = this.sky.baseHorizon;
       if (base && baseH) {
-        // Cloud cover pulls the sky toward the regime colour, scaled by daylight.
-        u.uZenithColor.value.copy(base).lerp(_wxTmp.copy(this._wxZen).multiplyScalar(day), 0.72);
-        u.uHorizonColor.value.copy(baseH).lerp(_wxTmp.copy(this._wxHor).multiplyScalar(day), 0.72);
+        /*
+         * Blend WEIGHT has to follow the overcast, or two opposite gradients
+         * average into no gradient at all.
+         *
+         * The sun-driven sky is Rayleigh-shaped: dark zenith, bright horizon. An
+         * overcast is the other way up — CIE S 011 makes the zenith about three
+         * times the horizon. Mixing the two at a fixed 0.72 lands both ends in
+         * the same place: measured live under OVERCAST, the zenith came out
+         * #253145 at luminance 0.1877 and the horizon #243341 at 0.1901, a ratio
+         * of 0.987. The two ends of the gradient were the same colour, so there
+         * was nothing to interpolate and the sky rendered as a flat plate. That
+         * is why correcting the regime hex values, and then the gradient
+         * exponent, both changed nothing: neither was ever reaching an image
+         * that had no gradient left to shape.
+         *
+         * Under a solid deck the sun's own sky is not visible at all, so take the
+         * regime's colours nearly outright; under a clear sky keep the sun's.
+         */
+        const wxW = THREE.MathUtils.lerp(0.55, 0.97, this.sky._overcast ?? 0);
+        u.uZenithColor.value.copy(base).lerp(_wxTmp.copy(this._wxZen).multiplyScalar(day), wxW);
+        u.uHorizonColor.value.copy(baseH).lerp(_wxTmp.copy(this._wxHor).multiplyScalar(day), wxW);
         this.fogColor.copy(this._wxFog).multiplyScalar(0.10 + 0.90 * day);
       } else {
         u.uZenithColor.value.copy(this._wxZen);
