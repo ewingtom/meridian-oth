@@ -73,6 +73,26 @@ export class SkySystem {
     // point of the lower hemisphere term is the bounce off the water.
     this.hemiLight = new THREE.HemisphereLight(0x8fb4d2, 0x24405c, 0.62);
     scene.add(this.hemiLight);
+
+    /*
+     * The moon.
+     *
+     * There wasn't one, and this scenario opens at 0410 with first usable light
+     * at 0505 — at four times speed that is fourteen real minutes before the
+     * player can see anything at all. With no moon and the sun below the horizon
+     * the key light is literally zero, so every ship rendered black. That is
+     * correct physics and a broken picture.
+     *
+     * Photometrically a full moon is about 0.25 lux against the sun's 100,000,
+     * which is a 400,000:1 ratio no display can show and no dark-adapted eye
+     * experiences that way. Every night scene ever shot is a deliberate lie
+     * about this, and so is this one: enough key to shape a hull and separate it
+     * from the sea, far too little to read as day.
+     */
+    this.moonLight = new THREE.DirectionalLight(0xaebfe0, 0.0);
+    this.moonLight.castShadow = false;
+    scene.add(this.moonLight);
+    this.moonLight.target = this.sunLight.target;
     // Sky-dome irradiance. At the default intensity of 1 a haze-grey hull whose
     // lit side is turned away from the sun rendered nearly black — which is not
     // what a warship looks like under an overcast-bright sky, where the whole
@@ -224,8 +244,10 @@ export class SkySystem {
 
     // Sky fill and image-based lighting follow the sun down too, or hulls stay
     // fully lit under a night sky.
-    this._hemiBase = THREE.MathUtils.lerp(0.05, 0.62, this.dayFactor);
-    this._envBase = THREE.MathUtils.lerp(0.06, 1.05, this.dayFactor);
+    // Night floors raised from 0.05/0.06. With no moon these were the ONLY light
+    // in the scene after dark, and at those values a hull returned nothing.
+    this._hemiBase = THREE.MathUtils.lerp(0.16, 0.62, this.dayFactor);
+    this._envBase = THREE.MathUtils.lerp(0.20, 1.05, this.dayFactor);
     this._sunColorBase = u.uSunColor.value.clone();
     this._applyLightBudget();
   }
@@ -270,6 +292,27 @@ export class SkySystem {
     // real numbers give. Night is handled by the palette, not here.
     this.weatherLight = 0.85 * beam + 0.15 * diffuse;
     this.sunLight.intensity = (this._sunBase ?? 1) * beam * this.keyScale;
+
+    /*
+     * Moon key, strongest when the sun is furthest down.
+     *
+     * It comes up as dayFactor falls and sits opposite the sun in azimuth, which
+     * is where a moon near opposition actually is — and, more usefully, means it
+     * lights the side of a ship the vanished sun was lighting rather than
+     * doubling up on the same flank. Cloud takes it away exactly as it takes the
+     * sun away, so an overcast night stays properly black.
+     */
+    if (this.moonLight) {
+      const night = 1 - this.dayFactor;
+      const az = THREE.MathUtils.degToRad(this._azimuth + 180);
+      const el = THREE.MathUtils.degToRad(38);
+      this.moonLight.position.set(
+        Math.sin(az) * Math.cos(el) * 400,
+        Math.sin(el) * 400,
+        Math.cos(az) * Math.cos(el) * 400,
+      );
+      this.moonLight.intensity = 0.16 * night * beam * this.keyScale;
+    }
     this.hemiLight.intensity = (this._hemiBase ?? 0.5) * diffuse * this.fillScale;
     this.scene.environmentIntensity = (this._envBase ?? 1) * diffuse * this.fillScale;
     // The sky shader uses uSunColor for the sun's glow AND for the light on the
