@@ -109,6 +109,21 @@ function normalizeHull(inst, cls) {
     const ranked = [['x', size.x], ['y', size.y], ['z', size.z]].sort((a, b) => b[1] - a[1]);
     const lenAxis = ranked[0][0], upAxis = ranked[1][0], beamAxis = ranked[2][0];
 
+    // Say so when the guess is a coin toss. Ranking the box only works while a
+    // ship is clearly taller than she is wide, and the closer those two get the
+    // less this means. The carrier is the case that proves it: with a properly
+    // proportioned island she is 78 m across the deck and 66 m to the masthead,
+    // so the solve confidently calls her BEAM the up axis and lays her on her
+    // side. She is fine because CVN_FORD declares `modelAxes` — but the next
+    // wide, low hull to arrive will not, and this is the only warning anyone
+    // will get before wondering why their ship is swimming sideways.
+    if (ranked[2][1] > ranked[1][1] * 0.75) {
+      // eslint-disable-next-line no-console
+      console.warn(`[UnitView] ${key}: up/beam extents are within 25% `
+        + `(${ranked[1][0]}=${ranked[1][1].toFixed(1)}, ${ranked[2][0]}=${ranked[2][1].toFixed(1)}). `
+        + 'The axis solve is a guess here — declare modelAxes on the class.');
+    }
+
     // Which way is up along upAxis? Sample the geometry and compare how much
     // cross-section survives at each extreme: a superstructure tapers to masts,
     // a hull bottom does not.

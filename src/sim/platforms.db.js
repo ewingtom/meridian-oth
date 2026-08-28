@@ -130,7 +130,14 @@ export const PLATFORMS = {
     id: 'CVN_FORD', type: 'CVN', domain: S,
     display: 'Gerald R. Ford-class carrier',
     role: 'The task force\'s reach. Everything else here shoots as far as it can see; she puts armed aircraft six hundred kilometres away and brings them back for another one.',
-    length: 333, beam: 78, mastHeight: 65, draft: 12, displacement: 100000,
+    // mastHeight and the sensor heights below are metres above the waterline and
+    // feed the radar-horizon calculation in Sensors.js. They were set before the
+    // island was rebuilt and ended up ABOVE the model's masthead — the ship was
+    // shorter than the mounts it declared. Brought back down to the art: the
+    // masthead is at 53.85 m, so the arrays sit where they visibly sit. Costs
+    // the carrier about a sixth of her own radar horizon, which matters little
+    // when the E-2D is the sensor that actually finds things.
+    length: 333, beam: 78, mastHeight: 54, draft: 12, displacement: 100000,
     rcs: 60000, acoustic: 2.4, model: 'carrier_cvn',
     // Declared, not guessed. The axis solve in normalizeHull calls the
     // second-longest bounding-box dimension "up", and on a carrier that is an
@@ -141,10 +148,10 @@ export const PLATFORMS = {
     maxSpeed: 15.4, accelTime: 150, turnRate: 0.028,
     hp: 420, crew: 4550, hvu: true,
     sensors: [
-      radar({ id: 'EASR_CVN', name: 'AN/SPY-6(V)2 EASR', height: 60, refRange: 260000, refAir: 250000, emitPower: 0.9, domains: [S, A, M] }),
-      radar({ id: 'SPN46', name: 'AN/SPN-46 approach control', height: 55, refRange: 60000, refAir: 90000, emitPower: 0.3, domains: [A], navRadar: true }),
-      esm({ id: 'SLQ32C', name: 'AN/SLQ-32(V)6 SEWIP', height: 58, sensitivity: 1.15, domains: [S, A, M] }),
-      eo({ id: 'CVNEO', name: 'Flight deck and bridge lookouts', height: 55, refRange: 24000, domains: [S, A, M] }),
+      radar({ id: 'EASR_CVN', name: 'AN/SPY-6(V)2 EASR', height: 50, refRange: 260000, refAir: 250000, emitPower: 0.9, domains: [S, A, M] }),
+      radar({ id: 'SPN46', name: 'AN/SPN-46 approach control', height: 46, refRange: 60000, refAir: 90000, emitPower: 0.3, domains: [A], navRadar: true }),
+      esm({ id: 'SLQ32C', name: 'AN/SLQ-32(V)6 SEWIP', height: 48, sensitivity: 1.15, domains: [S, A, M] }),
+      eo({ id: 'CVNEO', name: 'Flight deck and bridge lookouts', height: 46, refRange: 24000, domains: [S, A, M] }),
     ],
     weapons: [
       { id: 'ESSM', count: 32, launcher: 'Mk 29 GMLS' },
