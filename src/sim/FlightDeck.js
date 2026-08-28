@@ -257,6 +257,7 @@ export class FlightDeck {
           f.unit = u;
           u.deckFrame = f;
           this._launchTimer = this.cycleTime;
+          world.emit({ type: 'CATSHOT', unit: this.unit, aircraft: u, t: now });
         } else {
           // Could not spawn — put it back on the deck rather than losing it.
           f.state = FRAME.READY;

@@ -19,6 +19,9 @@ import { SIDE } from '../sim/constants.js';
  *                   the game has that much suspense per second.
  *   INTERCEPT  4  — something got killed in the air.
  *   LAUNCH     3  — a round leaving the rails. Common, so it yields to anything.
+ *   CATSHOT    2  — an aircraft off the bow. The lowest priority in the list
+ *                   because a deck cycle is thirty seconds long and there may
+ *                   be eight of them, but it is the shot that sells a carrier.
  *
  * A cut may only be replaced by something that outranks it, and never in its
  * first second. Otherwise a busy engagement — twelve rounds inbound, CIWS
@@ -31,8 +34,8 @@ import { SIDE } from '../sim/constants.js';
  * after it.
  */
 
-const PRI = { LAUNCH: 3, INTERCEPT: 4, CIWS: 4, TERMINAL: 5, HIT: 7, SUNK: 9 };
-const DUR = { LAUNCH: 5.0, INTERCEPT: 2.4, CIWS: 2.4, TERMINAL: 6.0, HIT: 3.6, SUNK: 6.5 };
+const PRI = { CATSHOT: 2, LAUNCH: 3, INTERCEPT: 4, CIWS: 4, TERMINAL: 5, HIT: 7, SUNK: 9 };
+const DUR = { CATSHOT: 5.5, LAUNCH: 5.0, INTERCEPT: 2.4, CIWS: 2.4, TERMINAL: 6.0, HIT: 3.6, SUNK: 6.5 };
 
 /** A cut may not be pre-empted inside this window, whatever turns up. */
 const MIN_HOLD = 0.9;
@@ -248,6 +251,24 @@ export class PipDirector {
         break;
       }
 
+      case 'CATSHOT': {
+        // From the bow, low, looking back down the angle of the deck — the
+        // aircraft comes off the cat straight at the camera and passes over it.
+        const u = s.unit, o = s.ord;
+        const live = o && o.alive;
+        ax = live ? o.x : s.x; az = live ? o.z : s.z;
+        const hdg = u ? u.heading : (live ? o.heading : 0);
+        const fx = Math.sin(hdg), fz = Math.cos(hdg);
+        eye.set(
+          cam.rx(u ? u.x : ax) + fx * 300 - fz * 60,
+          34,
+          cam.rz(u ? u.z : az) + fz * 300 + fx * 60,
+        );
+        at.set(cam.rx(ax), Math.max(12, live ? o.alt : 20), cam.rz(az));
+        fov = 34;
+        break;
+      }
+
       case 'HIT':
       case 'SUNK': {
         const u = s.unit;
@@ -293,6 +314,7 @@ export class PipDirector {
     const s = this.shot;
     if (!s) return '';
     switch (s.kind) {
+      case 'CATSHOT': return `${s.unit?.name || 'FLIGHT DECK'} — LAUNCHING`;
       case 'LAUNCH': return `${s.from?.name || 'LAUNCH'} — WEAPON AWAY`;
       case 'TERMINAL': return `${s.unit?.name || 'CONTACT'} — INBOUND`;
       case 'HIT': return `${s.unit?.name || 'CONTACT'} — IMPACT`;

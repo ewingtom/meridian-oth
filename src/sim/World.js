@@ -490,11 +490,58 @@ export class World {
       }
       u.cls = { ...u.cls, weapons: ld.weapons.slice() };
     }
+    this._stationOnLaunch(u, parent, ld);
     this.comms.push({
       t: this.time, from: parent.name, priority: 'ROUTINE',
       text: `${u.name} is airborne${ld ? ` — ${ld.name}` : ''}.`,
     });
     return u;
+  }
+
+  /**
+   * Put a newly-launched aircraft somewhere sensible.
+   *
+   * Without this an aircraft came off the catapult with no orders at all and
+   * flew the carrier's heading in a straight line until it ran out of fuel —
+   * which is not a thing that has ever happened on a flight deck, and it made
+   * the whole air wing feel like it needed babysitting from the second it left.
+   *
+   * A fighter goes to a barrier station between the force and the threat. Early
+   * warning goes further out on the same bearing, because that is the whole
+   * point of it. A helicopter stays close. Strike aircraft hold overhead and
+   * wait to be told where to go, since sending them anywhere before the player
+   * has designated a target would just burn the fuel they need to get there.
+   */
+  _stationOnLaunch(u, parent, ld) {
+    const role = ld ? ld.role : null;
+    // Threat bearing: toward the nearest thing we hold that is not ours.
+    const table = this.picture(parent.side);
+    let bx = parent.x + Math.sin(parent.heading) * 1000;
+    let bz = parent.z + Math.cos(parent.heading) * 1000;
+    let best = Infinity;
+    for (const t of (table ? table.list : [])) {
+      if (t.faded || t.own) continue;
+      if (t.identity === 'FRIEND' || t.identity === 'NEUTRAL') continue;
+      const d = Math.hypot(t.x - parent.x, t.z - parent.z);
+      if (d < best) { best = d; bx = t.x; bz = t.z; }
+    }
+    const brg = Math.atan2(bx - parent.x, bz - parent.z);
+    const at = (r) => ({ x: parent.x + Math.sin(brg) * r, z: parent.z + Math.cos(brg) * r });
+
+    if (role === 'CAP') {
+      const p = at(55000);
+      u.setOrbit(p.x, p.z, 18000);
+    } else if (role === 'AEW') {
+      const p = at(95000);
+      u.setOrbit(p.x, p.z, 26000);
+    } else if (role === 'STRIKE' || role === 'RECON') {
+      // Overhead, waiting for tasking. Tight orbit so it is easy to find.
+      u.setOrbit(parent.x, parent.z, 12000);
+    } else {
+      // Helicopters: a short leg out on the threat bearing.
+      const p = at(14000);
+      u.setOrbit(p.x, p.z, 7000);
+    }
   }
 
   /**

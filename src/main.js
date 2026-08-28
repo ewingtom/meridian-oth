@@ -170,6 +170,16 @@ class Game {
           }
           break;
         }
+        case 'CATSHOT': {
+          // An aircraft off the bow. Worth the inset: it is the one moment that
+          // shows what a carrier actually is.
+          this.view.launchCloud(ev.unit.x, ev.unit.z, 22, ev.unit.heading, 1.1, false);
+          this.audio.launch('ASM', dist(ev.unit.x, ev.unit.z));
+          this.pipDir.offer('CATSHOT', {
+            unit: ev.unit, ord: ev.aircraft, x: ev.unit.x, z: ev.unit.z, alt: 22,
+          });
+          break;
+        }
         case 'HIT': {
           // A 450 kg warhead going off inside a frigate is not a modest event.
           // Scale with the actual charge rather than a two-bucket guess.
