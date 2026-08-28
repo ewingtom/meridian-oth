@@ -461,8 +461,8 @@ export class BlueAutonomy {
      * That is also the moment the enemy's ESM hears it coming, which is the
      * price and is supposed to be.
      */
-    if (range < 150000 && u.ordered.emcon !== EMCON.ACTIVE) {
-      u.setEmcon(EMCON.ACTIVE);
+    if (range < 150000 && u.ordered.emcon !== EMCON.FULL) {
+      u.setEmcon(EMCON.FULL);
       this.world.comms.push({
         t: now, from: u.name, priority: 'ROUTINE',
         text: 'Going active on the run-in — taking my own picture.',
