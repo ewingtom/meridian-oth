@@ -49,8 +49,14 @@ export const PLATFORMS = {
       { id: 'CIWS', count: 2, launcher: 'Mk 15 mount' },
       { id: 'GUN127', count: 1, launcher: 'Mk 45' },
       { id: 'NULKA', count: 12, launcher: 'Mk 53' },
+      // Aviation stores. The embarked Seahawk arms from the ship, so without
+      // these the hangar has an aircraft in it and nothing to hang on it.
+      { id: 'MK54', count: 6, launcher: 'Mk 32 tubes / aircraft' },
+      { id: 'SONOBUOY', count: 60, launcher: 'aviation stores' },
     ],
-    aircraft: [{ type: 'MH60R', count: 1 }],
+    // Two, which is what a Flight IIA hangar holds — and what gives the deck
+    // somewhere to go once the alert aircraft is airborne.
+    aircraft: [{ type: 'MH60R', count: 2 }],
     fireControlChannels: 6,
   },
 
@@ -76,6 +82,8 @@ export const PLATFORMS = {
       { id: 'RAM', count: 21, launcher: 'SeaRAM' },
       { id: 'GUN127', count: 1, launcher: 'Mk 110' },
       { id: 'NULKA', count: 10, launcher: 'Mk 53' },
+      { id: 'MK54', count: 6, launcher: 'Mk 32 tubes / aircraft' },
+      { id: 'SONOBUOY', count: 60, launcher: 'aviation stores' },
     ],
     aircraft: [{ type: 'MH60R', count: 1 }],
     fireControlChannels: 4,

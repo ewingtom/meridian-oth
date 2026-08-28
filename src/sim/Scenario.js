@@ -237,12 +237,21 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
   // start a watch with a cold deck, and it also means the flight deck is not a
   // half-hour wall the first time the player opens it — the mechanic explains
   // itself with something already in it.
-  if (cvn.deck) {
-    cvn.deck.prep('FA18E', 'CAP', 2);
-    for (const f of cvn.deck.frames) {
+  // Alert aircraft. A carrier does not start a watch with a cold deck, and an
+  // escort keeps a Seahawk armed on the pad — which is also what keeps the
+  // LAUNCH HELO button doing what it has always done the first time it is
+  // pressed, now that every hangar goes through the deck scheduler.
+  const alert = (ship, type, ld, n) => {
+    if (!ship.deck) return;
+    ship.deck.prep(type, ld, n);
+    for (const f of ship.deck.frames) {
       if (f.state === 'PREPPING') { f.state = 'READY'; f.timer = 0; }
     }
-    cvn.deck.log.length = 0;
+    ship.deck.log.length = 0;
+  };
+  alert(cvn, 'FA18E', 'CAP', 2);
+  for (const u of world.units) {
+    if (u.side === SIDE.BLUE && u.deck && u.deck.catapults === 0) alert(u, 'MH60R', 'ASW', 1);
   }
 
   const ssn = world.spawn({

@@ -649,13 +649,38 @@ class Game {
     this.audio.ui('confirm');
   }
 
+  /**
+   * The escort's helicopter, through the deck like everything else.
+   *
+   * This used to call launchAircraft directly, which meant an escort could put
+   * an unlimited number of Seahawks in the air instantly while the carrier
+   * three miles away needed ten minutes to arm one. Every ship's hangar is a
+   * deck now, so this goes through the same scheduler — but each escort starts
+   * the watch with an alert aircraft already armed and on the pad, so the
+   * button still does what it always did the first time it is pressed. After
+   * that the player is paying the same ten minutes anybody else pays.
+   */
   launchHelo(parent) {
-    const u = this.world.launchAircraft(parent, 'MH60R');
-    if (u) {
-      u.setOrbit(parent.x + 12000, parent.z + 12000, 8000);
-      this.selection = [u];
+    const d = parent.deck;
+    if (!d) return;
+    const ready = d.count('READY', 'MH60R');
+    if (ready > 0) {
+      const ld = d.frames.find(f => f.state === 'READY' && f.type === 'MH60R')?.loadout || 'ASW';
+      d.launch('MH60R', ld, 1);
       this.audio.ui('confirm');
+      this.hud.pushAlert(`${parent.name} — Seahawk to the pad`, 'info', 3);
+    } else if (d.count('PREPPING', 'MH60R') > 0) {
+      const f = d.frames.find(x => x.state === 'PREPPING' && x.type === 'MH60R');
+      this.audio.ui('deny');
+      this.hud.pushAlert(`${parent.name} — aircraft arming, ${fmt.dur(Math.max(0, f.timer))} to go`, 'warn', 4);
+    } else if (d.prep('MH60R', 'ASW', 1)) {
+      this.audio.ui('confirm');
+      this.hud.pushAlert(`${parent.name} — arming the Seahawk, ten minutes`, 'info', 4);
+    } else {
+      this.audio.ui('deny');
+      this.hud.pushAlert(`${parent.name} — no aircraft available`, 'warn', 4);
     }
+    this.hud.dirty = true;
   }
 
   // ── flight deck ───────────────────────────────────────────────────────────
