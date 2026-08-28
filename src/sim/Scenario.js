@@ -181,6 +181,25 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
     emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
   });
 
+  // The carrier. She is the reason the task force is here and the reason it can
+  // reach past its own horizon — and she is also the single most valuable thing
+  // in the Kestrel Sea to the other side, which is what makes the screen a
+  // problem rather than a formality.
+  const cvn = world.spawn({
+    className: 'CVN_FORD', side: SIDE.BLUE, id: 'CVN-79',
+    name: 'USS KEARSARGE BAY', hullNo: 'CVN-79',
+    x: tfX + 2400, z: tfZ - 9800, heading: 8 * D2R, speed: 16 * KNOT,
+    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
+  });
+  // Aviation ordnance. The air wing draws from the ship's magazine, so this is
+  // the real limit on how many anti-ship sorties she can fly.
+  cvn.mags.LRASM = 24; cvn.magsMax.LRASM = 24;
+  cvn.mags.HARPOON = 16; cvn.magsMax.HARPOON = 16;
+  cvn.mags.AMRAAM = 96; cvn.magsMax.AMRAAM = 96;
+  cvn.mags.SIDEWINDER = 48; cvn.magsMax.SIDEWINDER = 48;
+  cvn.mags.MK54 = 18; cvn.magsMax.MK54 = 18;
+  cvn.mags.SONOBUOY = 400; cvn.magsMax.SONOBUOY = 400;
+
   const ffg1 = world.spawn({
     className: 'FFG_CONSTELLATION', side: SIDE.BLUE, id: 'FFG-64',
     name: 'USS SENTINEL', hullNo: 'FFG-64',
@@ -210,6 +229,21 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
   // The high value units sit well behind the screen, on the disengaged quarter.
   hvu1.station = { guide, relBearing: 160 * D2R, range: 15000 };
   hvu2.station = { guide, relBearing: -160 * D2R, range: 16000 };
+  // The carrier keeps station inside the screen, not behind it — she has to be
+  // able to turn into the wind to fly, and the screen conforms to her.
+  cvn.station = { guide, relBearing: 175 * D2R, range: 9000 };
+
+  // Two fighters sit alert on the deck, armed and spotted. A carrier does not
+  // start a watch with a cold deck, and it also means the flight deck is not a
+  // half-hour wall the first time the player opens it — the mechanic explains
+  // itself with something already in it.
+  if (cvn.deck) {
+    cvn.deck.prep('FA18E', 'CAP', 2);
+    for (const f of cvn.deck.frames) {
+      if (f.state === 'PREPPING') { f.state = 'READY'; f.timer = 0; }
+    }
+    cvn.deck.log.length = 0;
+  }
 
   const ssn = world.spawn({
     className: 'SSN_VIRGINIA', side: SIDE.BLUE, id: 'SSN-796',

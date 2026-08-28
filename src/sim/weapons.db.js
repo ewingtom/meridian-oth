@@ -58,6 +58,18 @@ export const WEAPONS = {
     minAlt: 2, maxAlt: 15000, quadPacked: true, cyclesToFire: 1, fireAndForget: true,
     blurb: 'Quad-packed point defence. Four to a VLS cell, which is how a destroyer survives a saturation raid instead of running dry.',
   },
+  AMRAAM: {
+    id: 'AMRAAM', name: 'AIM-120D AMRAAM', category: 'SAM', side: 'BLUE',
+    range: 160000, speed: 1300, seekerRange: 25000, rcs: 0.04, pkSingle: 0.75,
+    minAlt: 15, maxAlt: 20000, cyclesToFire: 0.6, fireAndForget: true,
+    blurb: 'The reason a fighter on station is worth more than another cell of SM-2: it carries its own launcher three hundred miles from the ship and shoots the archer instead of the arrow.',
+  },
+  SIDEWINDER: {
+    id: 'SIDEWINDER', name: 'AIM-9X Sidewinder', category: 'SAM', side: 'BLUE',
+    range: 26000, speed: 800, seekerRange: 18000, rcs: 0.02, pkSingle: 0.82,
+    minAlt: 10, maxAlt: 15000, cyclesToFire: 0.4, fireAndForget: true,
+    blurb: 'Short-range infrared. No radar warning for the target until it is far too late to matter.',
+  },
   RAM: {
     id: 'RAM', name: 'RIM-116 Rolling Airframe Missile', category: 'SAM', side: 'BLUE',
     range: 9000, speed: 680, seekerRange: 9000, rcs: 0.02, pkSingle: 0.78,

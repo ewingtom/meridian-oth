@@ -4,6 +4,7 @@ import {
 } from '../sim/constants.js';
 import { QUALITY_TIERS } from '../core/renderer.js';
 import { weapon, WEAPONS } from '../sim/weapons.db.js';
+import { loadout, loadoutsFor } from '../sim/airwing.db.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -137,11 +138,17 @@ export class Hud {
     }
 
     $('eng-cancel').onclick = () => this.closeEngage();
+    $('deck-close').onclick = () => this.closeDeck();
     $('eng-fire').onclick = () => this.confirmEngage();
   }
 
   // ── frame update ──────────────────────────────────────────────────────────
   update(dt) {
+    // The deck dialog is all timers, so it has to redraw while it is open.
+    if (this.deckShip) {
+      this._deckTick = (this._deckTick || 0) + dt;
+      if (this._deckTick > 0.5) { this._deckTick = 0; this._deckBody(); }
+    }
     const w = this.world;
     const g = this.game;
     $('clock').textContent = fmt.clock(w.time);
@@ -607,6 +614,17 @@ export class Hud {
       btn.disabled = !canEngage;
       btn.onclick = () => this.openEngage(t);
       body.appendChild(btn);
+
+      // Air tasking. Only offered when there is actually a package up to task —
+      // an inert button is a worse explanation of the mechanic than no button.
+      const pkg = this.game.world.units.filter(x => x.alive && x.side === SIDE.BLUE
+        && x.isAir && x.airRole === 'STRIKE' && !x.rtb && !x.strikeTrack);
+      if (canEngage && pkg.length && t.domain === DOMAIN.SURFACE) {
+        const sb = el('button', 'act danger', `Task strike — ${pkg.length} airborne`);
+        sb.title = 'Send every unassigned strike aircraft at this contact. They fly to where the TRACK says the ship will be, so a stale fix is a wasted sortie.';
+        sb.onclick = () => this.game.taskStrike(t);
+        body.appendChild(sb);
+      }
       if (t.identity === IDENT.PENDING || t.identity === IDENT.UNKNOWN) {
         const b2 = el('button', 'act', 'Designate HOSTILE');
         b2.onclick = () => { t.identity = IDENT.HOSTILE; t.identityLocked = true; this.game.audio?.ui('confirm'); body.dataset.state = ''; };
@@ -822,6 +840,21 @@ export class Hud {
     gA.appendChild(rowA2);
     body.appendChild(gA);
 
+    // Flight deck. A button rather than the panel itself: the deck needs more
+    // room than the selection strip has, so it opens as a dialog.
+    if (sel.length === 1 && u.deck && (u.cls.aircraft || []).length) {
+      const gF = el('div', 'ord-group');
+      const d = u.deck;
+      const ready = d.count('READY'), prep = d.count('PREPPING'), air = d.count('AIRBORNE');
+      gF.appendChild(el('div', 'k', `Air operations <span class="n">${d.spotsUsed}/${d.spots} spot</span>`));
+      const fb = el('button', 'act', 'FLIGHT DECK');
+      fb.onclick = () => this.openDeck(u);
+      gF.appendChild(fb);
+      gF.appendChild(el('div', 'sel-sub',
+        `${ready} ready · ${prep} arming · ${air} airborne${d.recovering ? ' · RECOVERING' : ''}`));
+      body.appendChild(gF);
+    }
+
     // Magazines / sensors
     if (sel.length === 1) {
       const gM = el('div', 'ord-group');
@@ -841,6 +874,127 @@ export class Hud {
         : `${u.sensors.length} sensors online · ${u.fcChannels} FC channels`));
       body.appendChild(gM);
     }
+  }
+
+  openDeck(ship) {
+    this.deckShip = ship;
+    document.getElementById('deck-modal').classList.add('on');
+    document.getElementById('deck-ship').textContent = `${ship.name}${ship.hullNo ? ` · ${ship.hullNo}` : ''}`;
+    this._deckBody();
+    this.game.audio?.ui('confirm');
+  }
+
+  closeDeck() {
+    this.deckShip = null;
+    document.getElementById('deck-modal').classList.remove('on');
+  }
+
+  /** Rebuild the dialog. Called on every deck action so timers stay live. */
+  _deckBody() {
+    const ship = this.deckShip;
+    const body = document.getElementById('deck-body');
+    if (!body) return;
+    body.innerHTML = '';
+    if (!ship || !ship.alive || !ship.deck) { this.closeDeck(); return; }
+    this._flightDeck(body, ship);
+  }
+
+  /**
+   * The flight deck.
+   *
+   * Modelled on Sea Power's flight-deck dialog, because that design is right:
+   * one row per aircraft-and-loadout, a count, a state, and one button that
+   * does the obvious thing. The reason it works is that it never asks the
+   * player to think about individual airframes — you say "four Hornets with
+   * anti-ship" and the deck works out the rest.
+   *
+   * The two numbers that matter are on the header: how much of the deck park is
+   * spoken for, and whether the landing area is fouled. Everything confusing
+   * about carrier operations comes back to one of those two.
+   */
+  _flightDeck(body, u) {
+    const deck = u.deck;
+    const g = el('div', 'ord-group deck');
+    // No title here: the dialog's own header already says what this is and
+    // names the ship. This line is the deck's state, which is the thing that
+    // changes.
+    const cats = deck.catapults ? `${deck.catapults} CATAPULTS` : 'HANGAR — NO CATAPULTS';
+    g.appendChild(el('div', 'k',
+      `${cats} <span class="n">${deck.spotsUsed}/${deck.spots} SPOT · ${deck.count('AIRBORNE')} AIRBORNE</span>`));
+
+    if (deck.recovering) {
+      g.appendChild(el('div', 'deck-warn', 'RECOVERING — catapults cold until the deck is clear'));
+    }
+
+    // One row per type+loadout that exists, plus one "arm" row per type.
+    for (const grp of deck.groups()) {
+      if (!grp.loadout && grp.states.STOWED === grp.total) continue;  // idle stock: shown in the arm row
+      const ld = grp.loadout ? loadout(grp.type, grp.loadout) : null;
+      const row = el('div', 'deck-row');
+      const st = grp.states;
+      const bits = [];
+      if (st.READY) bits.push(`<b>${st.READY}</b> ready`);
+      if (st.PREPPING) bits.push(`${st.PREPPING} arming ${fmt.dur(Math.max(0, grp.minTimer))}`);
+      if (st.LAUNCHING) bits.push(`${st.LAUNCHING} to cat`);
+      if (st.AIRBORNE) bits.push(`${st.AIRBORNE} airborne`);
+      if (st.RECOVERING) bits.push(`${st.RECOVERING} in the groove`);
+      if (st.COOLDOWN) bits.push(`${st.COOLDOWN} turning round ${fmt.dur(Math.max(0, grp.minTimer))}`);
+      if (st.STOWED) bits.push(`${st.STOWED} struck below`);
+      row.appendChild(el('div', 'deck-name', `${deck._typeName(grp.type)}${ld ? ` · ${ld.name}` : ''}`));
+      row.appendChild(el('div', 'deck-state', bits.join(' · ') || '—'));
+      if (ld && st.READY) {
+        const btns = el('div', 'btn-row');
+        const one = el('button', 'go', `LAUNCH ${st.READY > 1 ? '1' : ''}`);
+        one.onclick = () => this.game.deckLaunch(u, grp.type, grp.loadout, 1);
+        btns.appendChild(one);
+        if (st.READY > 1) {
+          const all = el('button', 'go', `LAUNCH ALL ${st.READY}`);
+          all.onclick = () => this.game.deckLaunch(u, grp.type, grp.loadout, st.READY);
+          btns.appendChild(all);
+        }
+        const dn = el('button', '', 'STAND DOWN');
+        dn.title = 'Strike the aircraft below and return its weapons to the magazine.';
+        dn.onclick = () => this.game.deckStandDown(u, grp.type, grp.loadout, st.READY);
+        btns.appendChild(dn);
+        row.appendChild(btns);
+      } else if (ld && st.PREPPING) {
+        const btns = el('div', 'btn-row');
+        const dn = el('button', '', 'CANCEL');
+        dn.onclick = () => this.game.deckStandDown(u, grp.type, grp.loadout, st.PREPPING);
+        btns.appendChild(dn);
+        row.appendChild(btns);
+      }
+      if (ld) row.title = ld.blurb;
+      g.appendChild(row);
+    }
+
+    // Arming. One block per airframe type the ship carries.
+    for (const type of deck.types()) {
+      const stowed = deck.count('STOWED', type);
+      const opts = loadoutsFor(type);
+      if (!opts.length) continue;
+      const row = el('div', 'deck-arm');
+      row.appendChild(el('div', 'deck-name', `${deck._typeName(type)} <span class="n">${stowed} available</span>`));
+      const btns = el('div', 'btn-row');
+      for (const ld of opts) {
+        const b = el('button', '', `${ld.name.toUpperCase()} <span class="n">${Math.round(ld.prep / 60)}m</span>`);
+        b.disabled = stowed <= 0 || deck.spotsFree <= 0;
+        b.title = `${ld.blurb}\n\nArms in ${Math.round(ld.prep / 60)} minutes. Draws ${ld.weapons.map(w => `${w.count}× ${w.id}`).join(', ') || 'no ordnance'} from the magazine.`;
+        b.onclick = (e) => this.game.deckPrep(u, type, ld.id, e.shiftKey ? 4 : 1);
+        btns.appendChild(b);
+      }
+      row.appendChild(btns);
+      g.appendChild(row);
+    }
+    g.appendChild(el('div', 'sel-sub', 'Shift-click to arm four. Aircraft draw their weapons from this ship\u2019s magazine.'));
+
+    // Flight operations log.
+    if (deck.log.length) {
+      const box = el('div', 'deck-log');
+      for (const e of deck.log.slice(-4)) box.appendChild(el('div', '', e.text));
+      g.appendChild(box);
+    }
+    body.appendChild(g);
   }
 
   /**

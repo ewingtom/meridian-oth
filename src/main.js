@@ -9,6 +9,7 @@ import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { buildScenario, Mission } from './sim/Scenario.js';
 import { weapon } from './sim/weapons.db.js';
+import { loadout } from './sim/airwing.db.js';
 import {
   EMCON, EMCON_ORDER, ROE, SIDE, IDENT, DOMAIN, NM, KNOT, clamp, angDiff,
   WEAPONS_QUALITY_TQ,
@@ -645,6 +646,64 @@ class Game {
       this.selection = [u];
       this.audio.ui('confirm');
     }
+  }
+
+  // ── flight deck ───────────────────────────────────────────────────────────
+  deckPrep(ship, type, loadoutId, n) {
+    const got = ship.deck?.prep(type, loadoutId, n) || 0;
+    if (got) {
+      this.audio.ui('confirm');
+      const ld = loadout(type, loadoutId);
+      this.hud.pushAlert(`${ship.name} — ${got} armed for ${ld.name}, up in ${Math.round(ld.prep / 60)} min`, 'info', 4);
+    } else {
+      this.audio.ui('deny');
+      this.hud.pushAlert(`${ship.name} — no deck space or no ordnance for that fit`, 'warn', 4);
+    }
+    this.hud.dirty = true;
+    this.hud._deckBody();
+  }
+
+  deckStandDown(ship, type, loadoutId, n) {
+    if (ship.deck?.standDown(type, loadoutId, n)) this.audio.ui('confirm');
+    else this.audio.ui('deny');
+    this.hud.dirty = true;
+    this.hud._deckBody();
+  }
+
+  deckLaunch(ship, type, loadoutId, n) {
+    const got = ship.deck?.launch(type, loadoutId, n) || 0;
+    if (got) {
+      this.audio.ui('confirm');
+      this.hud.pushAlert(`${ship.name} — ${got} to the catapults`, 'info', 4);
+    } else this.audio.ui('deny');
+    this.hud.dirty = true;
+    this.hud._deckBody();
+  }
+
+  /**
+   * Send every airborne strike aircraft at a designated contact.
+   *
+   * The player designates a TRACK, not a ship — so the strike inherits whatever
+   * error the track carries. A six-minute flight against a stale bearing-only
+   * fix puts two LRASM where the cruiser was, and that is the honest answer.
+   */
+  taskStrike(track) {
+    if (!track) return;
+    const pkg = this.world.units.filter(u => u.alive && u.side === SIDE.BLUE && u.isAir
+      && u.airRole === 'STRIKE' && !u.rtb && !u.strikeTrack);
+    if (!pkg.length) {
+      this.audio.ui('deny');
+      this.hud.pushAlert('No strike aircraft airborne. Arm an anti-ship fit on the carrier.', 'warn', 5);
+      return;
+    }
+    for (const u of pkg) { u.strikeTrack = track; u._ingressAt = 0; }
+    this.audio.ui('confirm');
+    this.hud.pushAlert(`${pkg.length} aircraft tasked against ${track.label || 'contact'}`, 'info', 5);
+    this.world.comms.push({
+      t: this.world.time, from: pkg[0].name, priority: 'PRIORITY',
+      text: `Package of ${pkg.length} outbound on ${track.label || 'the surface contact'}. Feet wet.`,
+    });
+    this.hud.dirty = true;
   }
 
   dropBuoy(u) {

@@ -6,6 +6,7 @@ import { OrdnanceSystem } from './Ordnance.js';
 import { DefenseSystem } from './Defense.js';
 import { RedCommander, BlueAutonomy } from './AI.js';
 import { weapon } from './weapons.db.js';
+import { FlightDeck } from './FlightDeck.js';
 import { Sonobuoy } from './Sonobuoy.js';
 import { SignalSystem } from './Signals.js';
 import { WeatherSystem } from './Weather.js';
@@ -71,7 +72,12 @@ export class World {
 
   add(unit) { this.units.push(unit); return unit; }
 
-  spawn(opts) { return this.add(new Unit(opts)); }
+  spawn(opts) {
+    const u = this.add(new Unit(opts));
+    u.world = this;
+    if ((u.cls.aircraft || []).length) u.deck = new FlightDeck(u);
+    return u;
+  }
 
   byId(id) { return this.units.find(u => u.id === id); }
 
@@ -121,6 +127,9 @@ export class World {
     }
     this.ordnance.step(dt, now);
     this.defense.step(dt, now);
+    for (const u of this.units) {
+      if (u.alive && u.deck) u.deck.step(dt, now, this);
+    }
     this.signals.step(dt);
     this.weatherSys.step(dt);
     this._detachedTasks(now);
@@ -449,14 +458,20 @@ export class World {
   }
 
   /** Launch an embarked aircraft from a parent unit. */
-  launchAircraft(parent, type) {
+  /**
+   * Put an airframe in the air. `ld` is the loadout it was armed with — the
+   * airframe's own class carries no weapons, so this is where a Super Hornet
+   * finds out whether it is an interceptor or an anti-ship strike.
+   */
+  launchAircraft(parent, type, ld = null) {
     const slot = (parent.cls.aircraft || []).find(a => a.type === type);
     if (!slot) return null;
     const already = this.units.filter(u => u.alive && u.homeBase === parent && u.className === type).length;
     if (already >= slot.count) return null;
+    const callsign = this._callsign(parent, type, ld);
     const u = this.spawn({
       className: type, side: parent.side,
-      name: `${parent.name.split(' ').pop()} ${type === 'MH60R' ? 'HAWK' : 'AIR'} ${already + 1}`,
+      name: callsign,
       x: parent.x + Math.sin(parent.heading) * 400,
       z: parent.z + Math.cos(parent.heading) * 400,
       heading: parent.heading, emcon: EMCON.PASSIVE,
@@ -464,7 +479,37 @@ export class World {
     u.homeBase = parent;
     u.alt = 40;
     u.ordered.alt = u.cls.cruiseAlt;
-    this.comms.push({ t: this.time, from: parent.name, priority: 'ROUTINE', text: `${u.name} is airborne.` });
+    if (ld) {
+      u.airRole = ld.role;
+      u.loadoutId = ld.id;
+      // The loadout is the magazine. Overwrite rather than add: the class
+      // defines no weapons for a strike fighter on purpose.
+      for (const w of ld.weapons) {
+        u.mags[w.id] = w.count;
+        u.magsMax[w.id] = w.count;
+      }
+      u.cls = { ...u.cls, weapons: ld.weapons.slice() };
+    }
+    this.comms.push({
+      t: this.time, from: parent.name, priority: 'ROUTINE',
+      text: `${u.name} is airborne${ld ? ` — ${ld.name}` : ''}.`,
+    });
     return u;
+  }
+
+  /**
+   * Callsigns, because "MERIDIAN AIR 3" is not how anybody talks and the fleet
+   * net is most of this game's texture. Squadron names by mission, a two-digit
+   * modex that increments.
+   */
+  _callsign(parent, type, ld) {
+    const stem = type === 'MH60R' ? 'SABRE'
+      : type === 'AEW_E2D' ? 'WALLBANGER'
+        : ld && ld.role === 'CAP' ? 'VICTORY'
+          : ld && ld.role === 'STRIKE' ? 'HAMMER'
+            : 'RANGER';
+    this._modex = this._modex || {};
+    const n = (this._modex[stem] = (this._modex[stem] || 100) + 1);
+    return `${stem} ${n}`;
   }
 }

@@ -805,3 +805,66 @@ body.cheap-ui #topbar {
 #pip-frame .pip-corner.bl { left: -1px; bottom: -1px; border-right: 0; border-top: 0; }
 #pip-frame .pip-corner.br { right: -1px; bottom: -1px; border-left: 0; border-top: 0; }
 @media (prefers-reduced-motion: reduce) { #pip-frame .pip-rec { animation: none; } }
+
+/* ── flight deck ──────────────────────────────────────────────────────────
+   One row per aircraft-and-loadout, the way Sea Power's flight-deck dialog
+   does it: what it is, what state it is in, and the one button that acts on
+   it. The deck is the only panel in the game that is about time rather than
+   position, so the timers are the thing that has to read at a glance. */
+.ord-group.deck .k .n { float: right; color: var(--accent); font-weight: 400; }
+.deck-warn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em;
+  color: #ffcf6a; background: rgba(255, 176, 60, 0.10);
+  border-left: 2px solid #ffb03c; padding: 4px 7px; margin: 4px 0;
+}
+.deck-row, .deck-arm {
+  border-top: 1px solid var(--line);
+  padding: 6px 0 5px;
+}
+.deck-row:first-of-type, .deck-arm:first-of-type { border-top: 0; }
+.deck-name {
+  font-family: var(--mono); font-size: 11px; color: var(--ink);
+  letter-spacing: 0.04em;
+}
+.deck-name .n { color: var(--muted); font-size: 10px; }
+.deck-state {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  margin: 2px 0 4px; font-variant-numeric: tabular-nums;
+}
+.deck-state b { color: var(--accent); font-weight: 700; }
+.deck-row .btn-row button.go,
+.deck-arm .btn-row button.go { color: var(--accent); border-color: var(--line-hi); }
+.deck-arm .btn-row button .n { color: var(--muted); margin-left: 4px; }
+.deck-log {
+  margin-top: 6px; border-top: 1px solid var(--line); padding-top: 5px;
+  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  line-height: 1.5; max-height: 62px; overflow: hidden;
+}
+
+/* The flight deck is a dialog, not a strip in the selection panel. It carries a
+   row per squadron plus an arming block per airframe type, which is more than
+   the bottom bar can show without the player scrolling a hundred-pixel window —
+   and Sea Power, which is where the layout comes from, makes it a window too. */
+#deck-modal {
+  position: fixed; inset: 0; z-index: 40; display: none;
+  align-items: center; justify-content: center; background: rgba(2,6,10,0.55);
+  backdrop-filter: blur(2px);
+}
+#deck-modal.on { display: flex; }
+#deck-box {
+  width: min(620px, 94vw); max-height: 92vh;
+  display: flex; flex-direction: column;
+  background: var(--panel-solid); border: 1px solid var(--line-hi);
+  box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+}
+#deck-box .hd, #deck-box .dlg-btns { flex: 0 0 auto; }
+#deck-box .bd { flex: 1 1 auto; overflow-y: auto; min-height: 0; padding: 14px 16px; }
+#deck-box .hd {
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px; letter-spacing: .18em; color: var(--accent);
+  display: flex; justify-content: space-between;
+}
+#deck-box .ord-group.deck { border: 0; padding: 0; margin: 0; }
+#deck-box .deck-row, #deck-box .deck-arm { padding: 9px 0 8px; }
+#deck-box .deck-name { font-size: 12px; }
+#deck-box .deck-state { font-size: 11px; }

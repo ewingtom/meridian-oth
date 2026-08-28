@@ -118,6 +118,59 @@ export const PLATFORMS = {
     fireControlChannels: 0,
   },
 
+  CVN_FORD: {
+    id: 'CVN_FORD', type: 'CVN', domain: S,
+    display: 'Gerald R. Ford-class carrier',
+    role: 'The task force\'s reach. Everything else here shoots as far as it can see; she puts armed aircraft six hundred kilometres away and brings them back for another one.',
+    length: 333, beam: 78, mastHeight: 65, draft: 12, displacement: 100000,
+    rcs: 60000, acoustic: 2.4, model: 'carrier_cvn',
+    maxSpeed: 15.4, accelTime: 150, turnRate: 0.028,
+    hp: 420, crew: 4550, hvu: true,
+    sensors: [
+      radar({ id: 'EASR_CVN', name: 'AN/SPY-6(V)2 EASR', height: 60, refRange: 260000, refAir: 250000, emitPower: 0.9, domains: [S, A, M] }),
+      radar({ id: 'SPN46', name: 'AN/SPN-46 approach control', height: 55, refRange: 60000, refAir: 90000, emitPower: 0.3, domains: [A], navRadar: true }),
+      esm({ id: 'SLQ32C', name: 'AN/SLQ-32(V)6 SEWIP', height: 58, sensitivity: 1.15, domains: [S, A, M] }),
+      eo({ id: 'CVNEO', name: 'Flight deck and bridge lookouts', height: 55, refRange: 24000, domains: [S, A, M] }),
+    ],
+    weapons: [
+      { id: 'ESSM', count: 32, launcher: 'Mk 29 GMLS' },
+      { id: 'RAM', count: 42, launcher: 'Mk 49 GMLS' },
+      { id: 'CIWS', count: 3, launcher: 'Mk 15 mount' },
+      { id: 'NULKA', count: 16, launcher: 'Mk 53' },
+    ],
+    // The air wing. `count` is airframes carried; the flight deck decides what
+    // state each one is in — see FlightDeck.js.
+    aircraft: [
+      { type: 'FA18E', count: 24 },
+      { type: 'AEW_E2D', count: 4 },
+      { type: 'MH60R', count: 6 },
+    ],
+    // Four catapults, three arresting-gear engines, and enough deck to spot a
+    // dozen aircraft without fouling the landing area.
+    flightDeck: { catapults: 4, spots: 12, cycleTime: 32, recoverTime: 46 },
+    fireControlChannels: 3,
+  },
+
+  FA18E: {
+    id: 'FA18E', type: 'VFA', domain: A,
+    display: 'F/A-18E Super Hornet',
+    role: 'Strike fighter. What it is carrying decides what it is — the airframe is the same one whether it is holding a CAP station or putting two anti-ship missiles into a cruiser.',
+    length: 18.3, beam: 13.6, mastHeight: 0, draft: 0,
+    rcs: 3, acoustic: 0, model: 'aircraft_fa18', air: true,
+    maxSpeed: 480, cruiseSpeed: 235, cruiseAlt: 9500, maxAlt: 15000,
+    accelTime: 14, turnRate: 0.22,
+    hp: 10, crew: 1, endurance: 2.6 * 3600,
+    sensors: [
+      radar({ id: 'APG79', name: 'AN/APG-79 AESA', height: 0, refRange: 150000, refAir: 140000, emitPower: 0.55, domains: [S, A, M], isar: true }),
+      esm({ id: 'ALR67', name: 'AN/ALR-67(V)3 RWR', height: 0, sensitivity: 1.0, domains: [S, A, M] }),
+      eo({ id: 'ATFLIR', name: 'AN/ASQ-228 ATFLIR', height: 0, refRange: 32000, domains: [S], identifies: true }),
+    ],
+    // Filled in from the loadout at launch — see airwing.db.js. The airframe
+    // carries nothing on its own.
+    weapons: [],
+    fireControlChannels: 2,
+  },
+
   SSN_VIRGINIA: {
     id: 'SSN_VIRGINIA', type: 'SSN', domain: U,
     display: 'Virginia-class attack submarine',
@@ -145,7 +198,7 @@ export const PLATFORMS = {
     display: 'P-8A Poseidon',
     role: 'Maritime patrol. Puts a radar horizon 240 nautical miles wide over the ocean — the difference between a task force that can see and one that cannot.',
     length: 40, beam: 37, mastHeight: 0, draft: 0,
-    rcs: 55, acoustic: 0, model: 'enemy_aircraft', air: true,
+    rcs: 55, acoustic: 0, model: 'aircraft_p8', air: true,
     maxSpeed: 240, cruiseSpeed: 190, cruiseAlt: 8000, maxAlt: 12500,
     accelTime: 40, turnRate: 0.05,
     hp: 22, crew: 9, endurance: 8 * 3600,
@@ -169,7 +222,7 @@ export const PLATFORMS = {
     display: 'E-2D Advanced Hawkeye',
     role: 'Airborne early warning. Lifts the air picture off the sea surface — the only way to see a sea-skimmer before it is ninety seconds out.',
     length: 18, beam: 25, mastHeight: 0, draft: 0,
-    rcs: 40, acoustic: 0, model: 'enemy_aircraft', air: true,
+    rcs: 40, acoustic: 0, model: 'aircraft_e2d', air: true,
     maxSpeed: 180, cruiseSpeed: 145, cruiseAlt: 9000, maxAlt: 10500,
     accelTime: 45, turnRate: 0.06,
     hp: 18, crew: 5, endurance: 5 * 3600,
@@ -187,7 +240,7 @@ export const PLATFORMS = {
     display: 'MH-60R Seahawk',
     role: 'Embarked ASW and surface-search helicopter. Short legs, but she can put a dipping sonar exactly where the towed array heard something.',
     length: 20, beam: 16, mastHeight: 0, draft: 0,
-    rcs: 12, acoustic: 0, model: 'enemy_aircraft', air: true, helo: true,
+    rcs: 12, acoustic: 0, model: 'aircraft_mh60', air: true, helo: true,
     maxSpeed: 72, cruiseSpeed: 55, cruiseAlt: 900, maxAlt: 3500,
     accelTime: 20, turnRate: 0.28,
     hp: 8, crew: 4, endurance: 3.2 * 3600,
@@ -302,7 +355,7 @@ export const PLATFORMS = {
     display: 'Tu-142 MEDVED maritime patrol aircraft',
     role: 'Hostile scout. If this aircraft finds your task force, a regiment of bombers gets your position an hour later.',
     length: 53, beam: 50, mastHeight: 0, draft: 0,
-    rcs: 90, acoustic: 0, model: 'enemy_aircraft', air: true,
+    rcs: 90, acoustic: 0, model: 'aircraft_bear', air: true,
     maxSpeed: 240, cruiseSpeed: 175, cruiseAlt: 7000, maxAlt: 11000,
     accelTime: 60, turnRate: 0.035,
     hp: 30, crew: 11, endurance: 12 * 3600,
@@ -321,7 +374,7 @@ export const PLATFORMS = {
     display: 'Tu-22M RAIDER missile bomber',
     role: 'Land-based anti-ship strike. Two Kh-32 apiece, launched from four hundred miles out. The regiment is the threat, not the aircraft.',
     length: 42, beam: 34, mastHeight: 0, draft: 0,
-    rcs: 100, acoustic: 0, model: 'enemy_aircraft', air: true,
+    rcs: 100, acoustic: 0, model: 'aircraft_backfire', air: true,
     maxSpeed: 480, cruiseSpeed: 260, cruiseAlt: 11000, maxAlt: 13500,
     accelTime: 50, turnRate: 0.04,
     hp: 26, crew: 4, endurance: 5 * 3600,

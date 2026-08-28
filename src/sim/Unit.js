@@ -57,6 +57,15 @@ export class Unit {
     this.mags = {};
     for (const w of cls.weapons || []) this.mags[w.id] = w.count;
     this.magsMax = { ...this.mags };
+    // Anything that can operate aircraft gets a deck — a destroyer's hangar and
+    // a carrier's flight deck are the same scheduler with different numbers.
+    // Built lazily by World.spawn so the deck can see a fully-formed unit.
+    this.deck = null;
+    /** Set on an airborne aircraft: the deck frame it launched from. */
+    this.deckFrame = null;
+    /** Set from the loadout at launch; decides what mission it is flying. */
+    this.airRole = null;
+    this.loadoutId = null;
     this.launchers = {};
     for (const w of cls.weapons || []) this.launchers[w.id] = w.launcher;
     this.reloadTimer = {};      // per-weapon cooldown

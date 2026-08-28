@@ -339,30 +339,189 @@ export class BlueAutonomy {
     this.lastReview = now;
     for (const u of this.world.units) {
       if (!u.alive || u.side !== SIDE.BLUE || !u.isAir) continue;
+      this._flyMission(u, now);
       const bingo = u.maxFuel * (u.cls.helo ? 0.30 : 0.20);
       if (u.fuel < bingo && !u.rtb) {
-        u.rtb = true;
-        const home = this._homeFor(u);
-        u.waypoints.length = 0; u.patrol = null;
-        if (home) u.orderWaypoint(home.x, home.z, { speed: u.cls.cruiseSpeed });
-        this.world.comms.push({
-          t: now, from: u.name, priority: 'ROUTINE',
-          text: `BINGO fuel. Returning to base. Time on station expired.`,
-        });
+        this._sendHome(u, now, 'BINGO fuel. Returning to base. Time on station expired.');
       }
       if (u.rtb) {
         const home = this._homeFor(u);
         if (home && Math.hypot(home.x - u.x, home.z - u.z) < (u.cls.helo ? 1200 : 30000)) {
           u.alive = false; u.despawned = true; u.recovered = true;
-          // Fixed-wing patrol and AEW stations are relieved, not abandoned.
-          if (!u.cls.helo) this.world.relieveOnStation(u);
+          // Into the groove. The deck takes the airframe back, holds the
+          // catapults while she is on final, and then puts her in cooldown —
+          // see FlightDeck.recover.
+          if (u.deckFrame && home.deck) {
+            home.deck.recover(u);
+            home.deck._note(`${u.name} in the groove`);
+          } else if (!u.cls.helo) {
+            // Shore-based patrol and AEW stations are relieved, not abandoned.
+            // Carrier aircraft are not: the player owns that deck.
+            this.world.relieveOnStation(u);
+          }
           this.world.onAircraftRecovered?.(u);
         }
       }
       if (u.fuel <= 0 && u.alive) {
         u.alive = false; u.despawned = true;
+        if (u.deckFrame) u.homeBase?.deck?.lost(u);
         this.world.comms.push({ t: now, from: 'TF-44 OPS', priority: 'FLASH', text: `${u.name} is down — fuel exhaustion.` });
       }
+    }
+  }
+
+  /**
+   * Fly the mission the aircraft was tasked with.
+   *
+   * A strike aircraft is not a ship with wings. It goes out, it releases, and
+   * the useful part of its life is over — everything after that is getting the
+   * airframe back so it can be turned round. So this runs three beats:
+   *
+   *   INGRESS  steer at where the target will be, not where it was seen. Six
+   *            minutes of flight against a cruiser doing twenty knots is four
+   *            kilometres of lead, and the seeker basket is not that wide.
+   *   RELEASE  inside about four fifths of the missile's reach, everything
+   *            comes off the rails at once. A single aircraft dribbling shots
+   *            is how you feed a defence one target at a time.
+   *   EGRESS   turn away and go home. It has nothing left to contribute and it
+   *            is now the most fragile thing in the sky.
+   *
+   * The aircraft shoots at a TRACK, with all the error that carries. If the
+   * track is stale the missiles fly at a position the ship left ten minutes
+   * ago, which is the honest outcome and the reason scouting matters.
+   */
+  _flyMission(u, now) {
+    const trk = u.strikeTrack;
+    if (!trk || u.rtb) return;
+
+    if (trk.faded && now - trk.lastUpdate > 900) {
+      this._sendHome(u, now, 'Lost the track. Nothing on the nose — going home with the load.');
+      return;
+    }
+
+    const asm = (u.cls.weapons || [])
+      .map(w => weapon(w.id))
+      .filter(w => w && w.category === 'ASM' && u.ammo(w.id) > 0)
+      .sort((a, b) => b.range - a.range)[0];
+    if (!asm) { this._sendHome(u, now); return; }
+
+    const range = Math.hypot(trk.x - u.x, trk.z - u.z);
+    const tof = range / Math.max(60, asm.speed);
+    const aim = trk.predictAt ? trk.predictAt(tof) : { x: trk.x, z: trk.z };
+
+    /*
+     * WHERE TO RELEASE is the whole judgement of a strike, and it is not a
+     * fraction of the missile's range.
+     *
+     * LRASM will fly 560 km. It does not follow that a 560 km shot is a shot.
+     * At 240 m/s that missile is in the air for thirty-nine minutes, and a
+     * cruiser doing twenty knots goes twenty-four kilometres in that time — so
+     * unless somebody is still watching her, the seeker arrives and searches an
+     * empty piece of ocean. The binding constraint is not reach, it is whether
+     * the target's position is still going to be inside the seeker's search
+     * footprint when the missile gets there.
+     *
+     * The track's own Kalman covariance answers that. Position error grows as
+     * sqrt(sigma_p^2 + (sigma_v * tof)^2); the seeker finds her if two sigma of
+     * that still fits inside half the search width. Solve for the time of
+     * flight that satisfies it and multiply by the missile's speed, and you get
+     * a release range that falls straight out of how well the target is being
+     * held.
+     *
+     * Which is the lesson: a weapons-quality track lets the package shoot from
+     * two hundred miles and go home. A stale bearing-only fix makes it fly all
+     * the way in and find the enemy itself — through whatever the enemy has put
+     * up to stop exactly that.
+     */
+    const P = trk.P;
+    const sigP = P ? Math.sqrt(Math.max(1, P[0])) : 4000;
+    const sigV = P ? Math.sqrt(Math.max(0.25, P[10])) : 8;
+    const half = (asm.seekerWidth || asm.seekerRange || 20000) * 0.5;
+    // Two sigma inside the basket, and never claim more than the weapon's reach.
+    const room = Math.sqrt(Math.max(0, (half / 2) ** 2 - sigP ** 2));
+    const tofMax = room / Math.max(0.5, sigV);
+    // The floor is where a strike aircraft stops being willing to press. Inside
+    // about forty-five kilometres it is inside the area-defence envelope of
+    // anything worth striking, and an aircraft that flies into an S-300 to
+    // improve its firing solution has made a bad trade.
+    const releaseAt = Math.min(asm.range * 0.85, Math.max(45000, tofMax * (asm.speed || 240)));
+    u.releaseAt = releaseAt;
+
+    /*
+     * Going active on the run-in.
+     *
+     * A package cannot shoot at a track it cannot hold, and the covariance that
+     * sets the release range above only shrinks if somebody is actually looking.
+     * The aircraft ingresses passive — it has no wish to announce itself across
+     * two hundred miles of ocean — and lights its own radar once it is close
+     * enough for that radar to be worth the emission. From then on the strike is
+     * refining its own targeting, the track tightens, the release range grows to
+     * meet the aircraft, and it shoots without having to press any closer.
+     *
+     * That is also the moment the enemy's ESM hears it coming, which is the
+     * price and is supposed to be.
+     */
+    if (range < 150000 && u.ordered.emcon !== EMCON.ACTIVE) {
+      u.setEmcon(EMCON.ACTIVE);
+      this.world.comms.push({
+        t: now, from: u.name, priority: 'ROUTINE',
+        text: 'Going active on the run-in — taking my own picture.',
+      });
+    }
+
+    if (range < releaseAt) {
+      let fired = 0;
+      const salvo = this.world.ordnance.nextSalvoId ? this.world.ordnance.nextSalvoId() : now;
+      for (const w of u.cls.weapons.slice()) {
+        const def = weapon(w.id);
+        if (!def || def.category !== 'ASM') continue;
+        while (u.ammo(w.id) > 0) {
+          const o = this.world.ordnance.fire(u, w.id, trk, { aim, salvoId: salvo });
+          if (!o) break;
+          fired++;
+        }
+      }
+      if (fired) {
+        this.world.comms.push({
+          t: now, from: u.name, priority: 'FLASH',
+          text: `Weapons away — ${fired} ${asm.name.split(' ').pop()} on ${trk.label || 'the surface contact'}. Off target, heading home.`,
+        });
+      }
+      this._sendHome(u, now);
+      return;
+    }
+
+    // Ingress. Re-aim every few seconds rather than every frame; the track only
+    // moves when somebody looks at it.
+    if (now - (u._ingressAt || 0) > 8) {
+      u._ingressAt = now;
+      u.waypoints.length = 0;
+      u.patrol = null;
+      u.orderWaypoint(aim.x, aim.z, { speed: u.cls.cruiseSpeed, alt: u.cls.cruiseAlt });
+    }
+  }
+
+  /**
+   * Turn an aircraft round and point it at the deck.
+   *
+   * This exists because it was originally three places. Bingo fuel set the
+   * course home; releasing on a target and losing the track both set `rtb` and
+   * nothing else — so a strike that had just shot its load kept flying the
+   * ingress waypoint it had been given, straight into the ship it had shot at,
+   * and the package died to the SAG's own air defences a few minutes after a
+   * successful attack. From the outside it looked like the strike worked and
+   * then the aircraft evaporated.
+   */
+  _sendHome(u, now, why) {
+    if (u.rtb) return;
+    u.rtb = true;
+    u.strikeTrack = null;
+    u.waypoints.length = 0;
+    u.patrol = null;
+    const home = this._homeFor(u);
+    if (home) u.orderWaypoint(home.x, home.z, { speed: u.cls.cruiseSpeed, alt: u.cls.cruiseAlt });
+    if (why) {
+      this.world.comms.push({ t: now, from: u.name, priority: 'ROUTINE', text: why });
     }
   }
 
