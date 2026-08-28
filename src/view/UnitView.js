@@ -524,7 +524,7 @@ export class UnitView {
     this.model = g;
     this.group.add(g);
     const props = [];
-    let rotor = null, tailRotor = null, rotodome = null;
+    let rotor = null, tailRotor = null, rotodome = null, gear = null;
     g.traverse((o) => {
       const n = (o.name || '').toLowerCase();
       // Match only the top-level spin nodes. `prop_1` is the group that turns;
@@ -534,7 +534,13 @@ export class UnitView {
       else if (n === 'rotor' || n === 'mainrotor') rotor = o;
       else if (n === 'tailrotor' || n === 'tail_rotor') tailRotor = o;
       else if (n === 'rotodome') rotodome = o;
+      // Undercarriage, so an airborne aircraft is not flying round with its
+      // gear hanging out. Only a carrier aircraft models it — the gear has to
+      // be there for the catapult shot and the deck park, and it is wrong every
+      // other second of the sortie.
+      else if (n === 'gear' || n === 'landing_gear') gear = o;
     });
+    this.gearNode = gear;
     // Contra-rotating pairs: the second disc of each pair turns the other way.
     // The Bear's eight prop nodes are numbered front 1-4, rear 5-8 for exactly
     // this, and without the flag both discs of a pair spin together, which reads
@@ -1200,6 +1206,13 @@ float shSeam(float x, float period, float width) {
       if (this.rotor) this.rotor.rotation.y += dt * 34;
       if (this.tailRotor) this.tailRotor.rotation.x += dt * 52;
       if (this.rotodome) this.rotodome.rotation.y += dt * 0.63;
+      // Gear comes up once she is off the deck and goes down on the way back in.
+      // Fifty metres is above anything on the flight deck and below any part of
+      // a departure, so it never toggles in the middle of a shot.
+      if (this.gearNode) {
+        const down = (this.unit.alt || 0) < 50;
+        if (this.gearNode.visible !== down) this.gearNode.visible = down;
+      }
     } else if (u.isSub) {
       const surfaced = u.alt > -12;
       g.position.set(x, Math.min(-1.5, u.alt * 0.35) - drop, z);
