@@ -1,4 +1,4 @@
-import { SIDE, DOMAIN, EMCON, ROE, IDENT, NM, KNOT, clamp } from './constants.js';
+import { SIDE, DOMAIN, EMCON, ROE, IDENT, NM, KNOT, clamp, Rng } from './constants.js';
 
 /*
  * Signal traffic — the thing that turns a sandbox into a watch.
@@ -42,6 +42,14 @@ export class Signal {
     this.answer = null;
     this.defaultKey = o.defaultKey || (o.choices ? o.choices[o.choices.length - 1].key : null);
     this.pin = o.pin || null;             // { x, z } to mark on the plot
+    /*
+     * How much this matters RIGHT NOW, as a multiplier on the draw. 1 is
+     * ordinary. A submarine datum that is four minutes old, an aircraft that is
+     * genuinely approaching bingo, a merchant already inside the screen — those
+     * should be what you hear about next, and they say so here rather than the
+     * scheduler having to re-derive a condition the generator has just checked.
+     */
+    this.urgency = o.urgency ?? 1;
   }
 
   get needsAnswer() { return !!this.choices && !this.resolved; }
@@ -54,13 +62,24 @@ const MIN = 60;
  * When the flag is going to talk to you, regardless of what your own captains
  * happen to be asking for at that moment.
  */
+/*
+ * Theatre traffic arrives in a WINDOW, not at a time.
+ *
+ * These used to be four exact stamps — the air plan at four minutes, the quiet
+ * window at seven, weapons release at twenty-two, the convoy at forty — and a
+ * player who had sailed once knew the whole watch in advance. The intent was
+ * only ever an ordering (find out about the deck early, release weapons before
+ * the convoy needs covering), so it is expressed as an ordering: each beat is
+ * drawn from its own range at the start of the sortie, from the sortie's seed.
+ * Same seed, same watch; different sortie, different watch.
+ */
 const SCHEDULED = [
   // The air plan comes first, before anything else asks for a decision. It is
   // how the player finds out there is a carrier and what a deck costs.
-  { kind: 'AIRPLAN', at: 4 * MIN },
-  { kind: 'EMCON_WINDOW', at: 7 * MIN },
-  { kind: 'WEAPONS_FREE', at: 22 * MIN },
-  { kind: 'CONVOY', at: 40 * MIN },
+  { kind: 'AIRPLAN', from: 3 * MIN, to: 6 * MIN },
+  { kind: 'EMCON_WINDOW', from: 6 * MIN, to: 14 * MIN },
+  { kind: 'WEAPONS_FREE', from: 16 * MIN, to: 34 * MIN },
+  { kind: 'CONVOY', from: 32 * MIN, to: 62 * MIN },
 ];
 
 export class SignalSystem {
@@ -74,6 +93,23 @@ export class SignalSystem {
     this.repeats = new Map();  // kind -> consecutive fires without another kind
     this.recentUnit = new Map();// `${kind}:${unitId}` -> earliest re-fire
     this._t = 0;
+
+    // Its own stream, derived from the sortie seed. Separate from world.rng so
+    // that drawing here does not shift the numbers every other system gets —
+    // otherwise changing when the fishing fleet speaks up would also change
+    // where a missile lands.
+    this.rng = new Rng(((world.scenario?.seed ?? 20260825) ^ 0x5f37) >>> 0 || 7);
+
+    // Roll each theatre beat's actual time out of its window, once, now.
+    this.beats = SCHEDULED.map(b => ({
+      kind: b.kind,
+      at: b.from + (b.to - b.from) * this.rng.next(),
+    }));
+
+    // When the next opportunistic signal may be considered. Jittered, because a
+    // fixed eleven-second poll makes every signal in the game land on the same
+    // grid — and a player who notices the grid can feel the machinery.
+    this._nextPoll = this.rng.range(6, 15);
     this.standing = {
       // Theatre-level directives currently in force. The mission scorer reads these.
       emconWindow: null,       // { until, level } — comply or be marked down
@@ -112,8 +148,9 @@ export class SignalSystem {
       });
     }
 
-    if (this._t < 11) return;
+    if (this._t < this._nextPoll) return;
     this._t = 0;
+    this._nextPoll = this.rng.range(6, 15);
     if (this.active.length >= 3) return;      // never more than three open decisions
 
     // Theatre-level traffic is SCHEDULED, not entered into the lottery. Left to
@@ -121,7 +158,7 @@ export class SignalSystem {
     // a turn at all — over a seven-hour run the player heard from three
     // generators and never once from CTF-40, which is the opposite of the point.
     const el = now - w.startedAt;
-    for (const beat of SCHEDULED) {
+    for (const beat of this.beats) {
       if (el < beat.at || this.fired.has(`sched:${beat.kind}`)) continue;
       const gen = GENERATORS.find(g => g.kind === beat.kind);
       if (!gen) continue;
@@ -135,49 +172,88 @@ export class SignalSystem {
     }
 
     /*
-     * Take the signal that has been silent longest, not the first one ready.
+     * Draw the next signal, weighted — do not rank them.
      *
-     * A rotating start stopped the top of the list starving the bottom, but it
-     * did not stop a generator that is ALWAYS eligible from taking every turn it
-     * came round to. Replenishment is eligible almost continuously — there is an
-     * oiler, and somebody is always the thinnest on fuel — so over a four hour
-     * sortie it took eight of fourteen signals, mostly from the same ship, while
-     * six generators never fired once: no shadower, no neutral CPA, no fishing
-     * fleet, no BDA, no weapons-free release.
+     * Two earlier versions of this both had the same flaw for different reasons.
+     * Walking GENERATORS in order let whatever sat at the top of the file take
+     * every turn: replenishment is eligible almost continuously, so over a four
+     * hour sortie it took eight of fourteen signals while six generators never
+     * fired once. Picking the kind that had been SILENT LONGEST fixed the
+     * starvation and replaced it with a script — the ordering is a pure function
+     * of what has already fired, so every sortie heard the same things in the
+     * same order, and at the start of a watch, when nothing has fired at all,
+     * the tie-break fell straight back to the order of this array.
      *
-     * Collecting every eligible generator and picking the one whose kind has
-     * been quiet longest costs one more pass and turns the watch into a varied
-     * one. A kind that has never fired sorts first, so the rare events finally
-     * get their turn.
+     * So: weight, then draw. Silence still counts — a kind nobody has heard from
+     * in half an hour is several times likelier than one that just spoke, which
+     * is what keeps the rare events in the rotation. But it is a weight and not
+     * a rank, so knowing the watch does not tell you the running order.
+     *
+     * URGENCY is the other half, and it is what makes the circuit answer to the
+     * world rather than to a clock. A signal may declare how much it matters
+     * right now — a submarine datum four minutes old, an aircraft genuinely
+     * approaching bingo, a merchant that is actually inside the screen — and
+     * that multiplies straight into the draw. The quiet watch stays a lottery;
+     * the moment something is actually wrong, the thing that is wrong is what
+     * you are most likely to hear about next.
+     *
+     * Every check() is pure — all the state changes live in the choices' apply()
+     * handlers — so evaluating all of them and choosing afterwards is safe.
      */
-    const ready = [];
+    const cand = [];
     for (const gen of GENERATORS) {
       if (!this._ready(gen.kind, now, gen.cooldown)) continue;
-      ready.push(gen);
-    }
-    ready.sort((a, b) => (this.lastFired.get(a.kind) ?? -1e9)
-                       - (this.lastFired.get(b.kind) ?? -1e9));
-    for (const gen of ready) {
+      // A kind the theatre is going to send on its own beat is not also in the
+      // lottery. Without this the flag can ask for an air plan at forty seconds
+      // and then ask again when the scheduled beat comes round, because the
+      // scheduled path only checks whether IT has fired, not whether the kind
+      // has. Every scheduled kind is eligible from the first poll, so this was
+      // reachable before the draw was randomised — it just needed the lottery
+      // to reach that far down the list.
+      if (this.beats.some(b => b.kind === gen.kind && !this.fired.has(`sched:${b.kind}`))) continue;
       const sig = gen.check(this, w, now);
       if (!sig) continue;
       // Do not ask the same ship the same question twice in a watch. If the
       // player ignores VANGUARD's fuel state, that is a decision; repeating it
       // every cooldown turns a decision into nagging.
-      if (sig.unit) {
-        const key = `${gen.kind}:${sig.unit.id}`;
-        if ((this.recentUnit.get(key) ?? -1e9) > now) continue;
-        this.recentUnit.set(key, now + Math.max(gen.cooldown || 600, 45 * MIN));
-      }
-      // Each consecutive fire of one kind pushes its own next turn further out.
-      const rep = (this.lastKind === gen.kind ? (this.repeats.get(gen.kind) || 0) + 1 : 0);
-      this.repeats.set(gen.kind, rep);
-      this.lastKind = gen.kind;
-      this.lastFired.set(gen.kind, now);
-      this.cooldown.set(gen.kind,
-        now + (gen.cooldown || 600) * Math.min(3, 1 + 0.6 * rep));
-      this.push(sig);
-      return;
+      if (sig.unit && (this.recentUnit.get(`${gen.kind}:${sig.unit.id}`) ?? -1e9) > now) continue;
+      // Never heard from counts as half an hour of silence, so the rare ones
+      // start the watch already worth hearing.
+      const since = now - (this.lastFired.get(gen.kind) ?? (now - 30 * MIN));
+      const weight = (1 + since / (10 * MIN)) * Math.max(0.05, sig.urgency ?? 1);
+      cand.push({ gen, sig, weight });
     }
+    if (!cand.length) return;
+
+    let roll = this.rng.next() * cand.reduce((a, c) => a + c.weight, 0);
+    let pick = cand[cand.length - 1];
+    for (const c of cand) { roll -= c.weight; if (roll <= 0) { pick = c; break; } }
+    const { gen, sig } = pick;
+
+    /*
+     * Only the WINNER gets to mark the world.
+     *
+     * Three generators used to set a "already-asked" flag on the unit inside check()
+     * — bingo fuel, battle damage, the distress relay — which was harmless
+     * while check() stopped at the first generator that produced anything.
+     * Evaluating all of them to weight the draw made it poison: a generator
+     * that lost the lottery still stamped its flag, and that aircraft's bingo
+     * call was then suppressed forever. Anything a generator wants to remember
+     * belongs here, where it runs once, on the one that was actually sent.
+     */
+    gen.claim?.(sig, w, now);
+    if (sig.unit) {
+      this.recentUnit.set(`${gen.kind}:${sig.unit.id}`,
+        now + Math.max(gen.cooldown || 600, 45 * MIN));
+    }
+    // Each consecutive fire of one kind pushes its own next turn further out.
+    const rep = (this.lastKind === gen.kind ? (this.repeats.get(gen.kind) || 0) + 1 : 0);
+    this.repeats.set(gen.kind, rep);
+    this.lastKind = gen.kind;
+    this.lastFired.set(gen.kind, now);
+    this.cooldown.set(gen.kind,
+      now + (gen.cooldown || 600) * Math.min(3, 1 + 0.6 * rep));
+    this.push(sig);
   }
 
   _ready(kind, now, cd) {
@@ -419,6 +495,8 @@ export const GENERATORS = [
       if (!cand) return null;
       return new Signal({
         kind: 'RAS', from: cand.name, unit: cand, priority: 'PRIORITY', opened: now,
+        // Thirty-three percent is a request. Eight percent is a problem.
+        urgency: 0.6 + 2.2 * (1 - magFraction(cand) / 0.34),
         subject: 'REQUEST TO DETACH FOR REPLENISHMENT',
         text: `${cand.name} is down to ${Math.round(magFraction(cand) * 100)} percent on her heaviest magazine. Request permission to detach and go alongside ${oiler.name} for a vertical replenishment.`,
         detail: 'Twenty minutes off the screen. She comes back with full cells; until then that is one less shooter and one less SAM engagement channel.',
@@ -464,6 +542,10 @@ export const GENERATORS = [
       const nm = (holder.d / NM).toFixed(0);
       return new Signal({
         kind: 'PROSECUTE', from: u.name, unit: u, track: sub, priority: 'FLASH', opened: now,
+        // A datum decays fast. Seconds old and close aboard is the most urgent
+        // thing that can be on the circuit; three minutes old and forty miles
+        // away is a report, not an emergency.
+        urgency: 2.6 * (1 - (now - sub.lastUpdate) / 260) * (1 - holder.d / 90000) + 0.4,
         subject: 'SUBSURFACE CONTACT — REQUEST INTENTIONS',
         text: `${u.name} holds a subsurface contact, ${nm} miles, track quality ${sub.tq}. Classification is ambiguous. Request intentions.`,
         detail: 'A torpedo run from a boat you have not localised is the fastest way to lose a high value unit. Prosecuting costs you a hull off the screen and announces that you know he is there.',
@@ -517,6 +599,8 @@ export const GENERATORS = [
       const nm = (Math.hypot(n.x - hvu.x, n.z - hvu.z) / NM).toFixed(0);
       return new Signal({
         kind: 'NEUTRAL_CLOSE', from: 'TF-44 TAO', unit: n, priority: 'PRIORITY', opened: now,
+        // Twenty-six kilometres is a heads-up; five is a hull masking the HVU.
+        urgency: 0.7 + 2.3 * (1 - Math.hypot(n.x - hvu.x, n.z - hvu.z) / 26000),
         subject: 'NEUTRAL CONTACT INSIDE THE SCREEN',
         text: `A neutral merchant is ${nm} miles from ${hvu.name} and still closing. He has no idea we are here.`,
         detail: 'A hull that close masks anything behind it and will absorb a missile meant for us. Warning him off means transmitting.',
@@ -567,6 +651,7 @@ export const GENERATORS = [
     // A mayday is not a routine event. At a 30-minute floor, and with shipping
     // now actually on the task group's track, six of them came up in a four-hour
     // sortie and the thing stopped being an emergency.
+    claim(sig) { if (sig.unit) sig.unit._distress = true; },
     kind: 'DISTRESS', cooldown: 95 * MIN,
     check(sys, w, now) {
       if (now - w.startedAt < 8 * MIN) return null;
@@ -574,7 +659,6 @@ export const GENERATORS = [
         && Math.hypot(u.x - w.blueGuide.x, u.z - w.blueGuide.z) < 140000);
       if (!n) return null;
       if (w.rng.next() > 0.55) return null;
-      n._distress = true;
       const kinds = [
         'has a man overboard and no boat that will start',
         'is reporting an engine-room fire and asking for anyone who can close',
@@ -766,14 +850,17 @@ export const GENERATORS = [
 
   // ── an aircraft at bingo ─────────────────────────────────────────────────
   {
+    claim(sig) { if (sig.unit) sig.unit._bingoAsked = true; },
     kind: 'BINGO', cooldown: 8 * MIN,
     check(sys, w, now) {
       const a = w.units.find(u => u.alive && u.isAir && u.side === SIDE.BLUE
         && u.maxFuel > 0 && u.fuel / u.maxFuel < 0.22 && !u._bingoAsked);
       if (!a) return null;
-      a._bingoAsked = true;
       return new Signal({
         kind: 'BINGO', from: a.name, unit: a, priority: 'PRIORITY', opened: now,
+        // Twenty-two percent is a courtesy call; five percent is an aircraft
+        // about to be lost, and it should not be waiting in a queue.
+        urgency: 0.8 + 3.0 * (1 - (a.fuel / a.maxFuel) / 0.22),
         subject: 'BINGO FUEL',
         text: `${a.name} is at bingo. Request to detach for home plate — or say the word and I will stretch it.`,
         detail: 'A relief airframe is roughly forty minutes out from the moment you release this one. Stretching it buys you fifteen more minutes of coverage and risks losing the aircraft.',
@@ -802,14 +889,16 @@ export const GENERATORS = [
 
   // ── battle damage report ─────────────────────────────────────────────────
   {
+    claim(sig) { if (sig.unit) sig.unit._bdaAsked = true; },
     kind: 'BDA', cooldown: 6 * MIN,
     check(sys, w, now) {
       const u = w.units.find(x => x.alive && x.side === SIDE.BLUE && !x.isAir
         && x.damage.sensors > 0.4 && !x._bdaAsked);
       if (!u) return null;
-      u._bdaAsked = true;
       return new Signal({
         kind: 'BDA', from: u.name, unit: u, priority: 'FLASH', opened: now,
+        // A ship that has just been blinded is news. Scale with how blind.
+        urgency: 1.2 + 2.0 * u.damage.sensors,
         subject: 'SENSOR CASUALTY',
         text: `${u.name} has lost most of her radar picture to blast damage. I can still shoot on remote, but I am not seeing anything for myself.`,
         detail: 'A blind ship in the anti-air picket is a hole in the picket that the picket does not know about.',
