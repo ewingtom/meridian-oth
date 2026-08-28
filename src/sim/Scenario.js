@@ -1,5 +1,6 @@
 import { SIDE, EMCON, ROE, IDENT, DOMAIN, NM, KNOT, AO_HALF, Rng, D2R, WEAPONS_QUALITY_TQ } from './constants.js';
 import { World } from './World.js';
+import { weapon } from './weapons.db.js';
 import {
   HULL_NAMES, MERCHANT_NAMES, TRAWLER_NAMES,
   BLUE_CATALOGUE, RED_CATALOGUE, posture,
@@ -520,6 +521,44 @@ function applyPosture(world, spec, scenario) {
   // He has a solution on the task force. Hand the red commander the truth
   // rather than making him search for it.
   world.redKnowsBlue = { x: world.blueGuide.x, z: world.blueGuide.z, t: world.time };
+
+  if (p.opening === 'INBOUND') {
+    /*
+     * The salvo the posture promises.
+     *
+     * HOT says "the first salvo is already in the air", and for a while it said
+     * only that — it set weapons free, lit everybody up and then handed the
+     * player a perfectly quiet ocean. A posture that describes a raid has to
+     * produce a raid.
+     *
+     * The shot is taken at the guide's actual position rather than through the
+     * track system, because the fiction is that he solved the targeting problem
+     * ten minutes ago and this is the consequence. Half the launchers, not all
+     * of them: the point is to open the game inside a defended-zone problem,
+     * not to decide it before the player has touched anything.
+     */
+    const target = world.blueGuide;
+    let fired = 0;
+    for (const u of world.redSag) {
+      const asm = (u.cls.weapons || [])
+        .map(w => w.id)
+        .find(id => (u.mags[id] || 0) > 0 && weapon(id)?.category === 'ASM');
+      if (!asm) continue;
+      const n = Math.max(1, Math.floor((u.mags[asm] || 0) / 2));
+      for (let i = 0; i < n; i++) {
+        const o = world.ordnance.fire(u, asm, null, { aim: { x: target.x, z: target.z } });
+        if (!o) break;
+        fired++;
+      }
+      u.setEmcon(EMCON.FULL);
+    }
+    if (fired) {
+      world.comms.push({
+        t: world.time, from: 'TF-44 TAO', priority: 'FLASH',
+        text: `VAMPIRE VAMPIRE VAMPIRE — ${fired} inbound. He shot first.`,
+      });
+    }
+  }
 
   if (p.opening === 'SHADOWED') {
     // Put the Bear where a shadower would be: overhead, and already radiating.

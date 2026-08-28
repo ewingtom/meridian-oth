@@ -160,8 +160,39 @@
         </p>
       </div>
       <div class="menu-btns">
-        <button id="btn-start">Begin Operation</button>
+        <button id="btn-start">Engage Now</button>
+        <button class="ghost" id="btn-setup">Set Up Engagement</button>
         <button class="ghost" id="btn-howto">Controls &amp; Doctrine</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen hidden gone" id="screen-setup">
+    <div class="setup-wrap">
+      <div class="setup-hd">
+        <div>
+          <h2>SET UP ENGAGEMENT</h2>
+          <div class="sub">Compose both sides, place them, and choose how hot it starts.</div>
+        </div>
+        <div class="setup-hd-r">
+          <button class="ghost" id="btn-setup-random">Randomise</button>
+          <button class="ghost" id="btn-setup-back">Back</button>
+        </div>
+      </div>
+      <div class="setup-cols">
+        <div class="setup-col" id="setup-blue"></div>
+        <div class="setup-mid">
+          <canvas id="setup-map"></canvas>
+          <div class="setup-maphint">Drag a group to move it · drag its arrow to set course</div>
+        </div>
+        <div class="setup-col" id="setup-red"></div>
+      </div>
+      <div class="setup-ft">
+        <div id="setup-posture"></div>
+        <div class="setup-ft-r">
+          <div class="setup-tally" id="setup-tally"></div>
+          <button id="btn-setup-go">Begin Operation</button>
+        </div>
       </div>
     </div>
   </div>

@@ -7,7 +7,8 @@ import { SceneView } from './view/SceneView.js';
 import { TacticalOverlay } from './ui/TacticalOverlay.js';
 import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
-import { buildScenario, Mission } from './sim/Scenario.js';
+import { buildScenario, defaultSpec, Mission } from './sim/Scenario.js';
+import { SetupScreen } from './ui/SetupScreen.js';
 import { weapon } from './sim/weapons.db.js';
 import { loadout } from './sim/airwing.db.js';
 import {
@@ -17,6 +18,26 @@ import {
 
 const $ = (id) => document.getElementById(id);
 
+/**
+ * Pick up a force spec left by the setup screen, and consume it.
+ *
+ * Read-and-clear on purpose: the composed engagement is for the launch it was
+ * composed for. Leaving it in place would mean every later reload silently
+ * re-sailed a battle the player set up once, including the browser restoring
+ * the tab days later.
+ */
+function readSetupHandoff() {
+  try {
+    const raw = sessionStorage.getItem('oth.setup');
+    if (!raw) return null;
+    sessionStorage.removeItem('oth.setup');
+    const o = JSON.parse(raw);
+    return (o && o.spec && o.spec.blue && o.spec.red) ? o : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 class Game {
   constructor() {
     this.canvas = $('gl');
@@ -24,9 +45,28 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 1, 400000);
     this.cam = new CameraDirector(this.camera, this.canvas);
 
-    // ?seed=12345 replays a specific sortie; without it every game is new.
+    /*
+     * Where the order of battle comes from, in priority order.
+     *
+     * A spec left in sessionStorage by the setup screen wins, because the
+     * player has just composed it and pressed Begin. The world and everything
+     * bound to it — the view, the mission, the HUD, the overlay — are built in
+     * this constructor and wired to each other, so handing a new force spec to
+     * a RUNNING game would mean rebuilding all of that live. A reload is one
+     * line, cannot leave a half-rewired object behind, and costs a second
+     * against cached assets. The boundary is honest: a different order of
+     * battle is a different game.
+     *
+     * Failing that, ?seed=12345 replays a specific sortie, and failing that
+     * every launch is new.
+     */
+    const handoff = readSetupHandoff();
     const seedParam = new URLSearchParams(location.search).get('seed');
-    this.world = buildScenario(seedParam ? (parseInt(seedParam, 10) | 0) : undefined);
+    this.world = buildScenario(
+      handoff ? handoff.spec
+        : (seedParam ? (parseInt(seedParam, 10) | 0) : undefined),
+    );
+    this._handoff = handoff;
     this.mission = new Mission(this.world);
     this.world.mission = this.mission;
 
@@ -927,6 +967,44 @@ class Game {
   }
 
   _wireScreens() {
+    /*
+     * The setup screen builds a force spec and hands it back through a reload.
+     * It never touches the running world — see the constructor for why.
+     */
+    $('btn-setup').onclick = () => {
+      this.audio.unlock();
+      if (!this.setup) {
+        this.setup = new SetupScreen(this._editSpec || (this._editSpec = defaultSpec()), {
+          onBegin: (spec) => {
+            try {
+              sessionStorage.setItem('oth.setup', JSON.stringify({ spec, autostart: true }));
+            } catch (e) { /* private mode: fall through and sail the default */ }
+            location.reload();
+          },
+          onBack: () => { this._hideScreen('screen-setup'); this._showScreen('screen-menu'); },
+          onRandomise: () => {
+            // A fresh draw of everything the generator decides — enemy bearing,
+            // range and course — with the player's composition left alone,
+            // because they did not ask to have their ships taken away.
+            const fresh = defaultSpec();
+            const keep = this._editSpec;
+            fresh.blue.ships = keep.blue.ships;
+            fresh.red.sag.ships = keep.red.sag.ships;
+            fresh.neutral = keep.neutral;
+            fresh.posture = keep.posture;
+            this._editSpec = fresh;
+            this.setup.setSpec(fresh);
+          },
+        });
+        window.addEventListener('resize', () => {
+          if (!$('screen-setup').classList.contains('gone')) this.setup.resize();
+        });
+      }
+      this._hideScreen('screen-menu');
+      this._showScreen('screen-setup');
+      this.setup.render();
+    };
+
     $('btn-start').onclick = () => {
       this.audio.unlock();
       this._hideScreen('screen-menu');
@@ -1667,6 +1745,16 @@ async function boot() {
   step(100, 'READY');
   $('loading').classList.add('hidden');
   game.frame();
+
+  // Straight to the briefing when the player has just composed this engagement.
+  // Sending them back to the main menu to press Begin a second time would be
+  // asking them to confirm a decision they have already made.
+  if (game._handoff && game._handoff.autostart) {
+    $('screen-menu').classList.add('hidden', 'gone');
+    game._fillBrief();
+    game._wireScroll('brief-body');
+    game._showScreen('screen-brief');
+  }
 
   // ?skip jumps straight into the operation. Used by the automated checks, and
   // convenient when iterating on something forty minutes into a mission.

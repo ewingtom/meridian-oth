@@ -881,3 +881,103 @@ body.cheap-ui #topbar {
 #deck-box .deck-row, #deck-box .deck-arm { padding: 9px 0 8px; }
 #deck-box .deck-name { font-size: 12px; }
 #deck-box .deck-state { font-size: 11px; }
+
+/* ── pre-mission setup ─────────────────────────────────────────────────────
+   Three columns: what you have, where everything is, what they have. The map
+   is the middle one because position is the part that cannot be expressed as a
+   number — everything else is a counter, and a counter is a row of text. */
+#screen-setup .setup-wrap {
+  width: min(1500px, 96vw); height: min(880px, 92vh);
+  display: flex; flex-direction: column; gap: 12px; overflow: auto;
+  background: var(--panel-solid); border: 1px solid var(--line-hi);
+  box-shadow: 0 30px 90px rgba(0,0,0,0.7);
+  padding: 16px 18px;
+}
+.setup-hd { display: flex; justify-content: space-between; align-items: flex-start; flex: 0 0 auto; }
+.setup-hd h2 {
+  font-family: var(--mono); font-size: 15px; letter-spacing: .22em;
+  color: var(--accent); margin: 0 0 3px;
+}
+.setup-hd .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.setup-hd-r { display: flex; gap: 8px; }
+.setup-cols {
+  /* min-height, not just flex-grow. The footer is fixed-size and the posture
+     blurbs can wrap tall, and on a short viewport that footer took the entire
+     wrapper and left the chart two pixels high. The chart is the point of this
+     screen, so it gets a floor and the wrapper scrolls if the window really is
+     that small. */
+  flex: 1 1 auto; min-height: 260px;
+  display: grid; grid-template-columns: 300px 1fr 300px; gap: 14px;
+}
+.setup-col { overflow-y: auto; min-height: 0; padding-right: 4px; }
+.setup-mid { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+#setup-map {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  border: 1px solid var(--line-hi); background: #050c13;
+  cursor: crosshair; touch-action: none;
+}
+.setup-maphint {
+  flex: 0 0 auto; text-align: center;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; color: var(--dimmer);
+}
+.setup-sec {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .18em;
+  color: var(--accent); text-transform: uppercase;
+  padding: 10px 0 6px; border-bottom: 1px solid var(--line); margin-bottom: 6px;
+}
+.setup-sec.red { color: #ff8b84; }
+.setup-row {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+  padding: 6px 0; border-bottom: 1px solid rgba(122,178,214,0.08);
+}
+.setup-row .nm { font-family: var(--mono); font-size: 11px; color: var(--ink); }
+.setup-row .hint {
+  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  line-height: 1.5; margin-top: 2px;
+}
+.setup-stepper { display: flex; align-items: center; gap: 6px; }
+.setup-stepper button {
+  width: 24px; height: 24px; padding: 0; font-size: 13px; line-height: 1;
+  font-family: var(--mono);
+}
+.setup-stepper .v {
+  font-family: var(--mono); font-size: 13px; color: var(--accent);
+  min-width: 20px; text-align: center; font-variant-numeric: tabular-nums;
+}
+.setup-stepper .v.zero { color: var(--dimmer); }
+.setup-ft {
+  flex: 0 0 auto; display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 16px; border-top: 1px solid var(--line); padding-top: 12px;
+}
+#setup-posture { display: flex; gap: 8px; max-width: 62%; min-width: 0; }
+.posture-opt {
+  /* 1 1 0, not 1 1 200px: a 200px basis makes three of these demand 600px and
+     wrap into a column three times as tall as the chart they sit under. */
+  flex: 1 1 0; min-width: 0; text-align: left; padding: 8px 10px;
+  border: 1px solid var(--line); background: rgba(10,20,30,0.5); cursor: pointer;
+}
+.posture-opt.on { border-color: var(--accent); background: var(--accent-dim); }
+.posture-opt .pl {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+  color: var(--ink); text-transform: uppercase;
+}
+.posture-opt.on .pl { color: var(--accent); }
+.posture-opt .pb {
+  font-family: var(--mono); font-size: 9.5px; color: var(--muted);
+  line-height: 1.5; margin-top: 3px;
+  /* Clamped: these are three sentences of flavour and they must not be allowed
+     to set the height of the footer. */
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.setup-ft-r { display: flex; align-items: center; gap: 14px; }
+.setup-tally {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  text-align: right; line-height: 1.6; font-variant-numeric: tabular-nums;
+}
+.setup-tally b { color: var(--accent); }
+.setup-tally .warn { color: #ffcf6a; }
+@media (max-width: 1180px) {
+  .setup-cols { grid-template-columns: 250px 1fr 250px; }
+  #setup-posture { max-width: 54%; }
+}
