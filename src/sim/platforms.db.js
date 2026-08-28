@@ -132,6 +132,12 @@ export const PLATFORMS = {
     role: 'The task force\'s reach. Everything else here shoots as far as it can see; she puts armed aircraft six hundred kilometres away and brings them back for another one.',
     length: 333, beam: 78, mastHeight: 65, draft: 12, displacement: 100000,
     rcs: 60000, acoustic: 2.4, model: 'carrier_cvn',
+    // Declared, not guessed. The axis solve in normalizeHull calls the
+    // second-longest bounding-box dimension "up", and on a carrier that is an
+    // argument between a 78 m flight deck and the masthead — which the art then
+    // has to win rather than be shaped correctly. Stating it here means the
+    // island can be built the height an island actually is.
+    modelAxes: { len: 'z', up: 'y', beam: 'x', upSign: 1, lenSign: 1 },
     maxSpeed: 15.4, accelTime: 150, turnRate: 0.028,
     hp: 420, crew: 4550, hvu: true,
     sensors: [

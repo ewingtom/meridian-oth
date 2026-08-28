@@ -37,6 +37,7 @@ const _hullCal = new Map();
 const _prepared = new Map();
 /** Modelled airframes, by class. Anything absent falls back to the procedural build. */
 const AIRCRAFT_MODELS = {
+  FA18E: 'aircraft_fa18',
   MPA_P8: 'aircraft_p8',
   AEW_E2D: 'aircraft_e2d',
   MH60R: 'aircraft_mh60',
@@ -73,6 +74,34 @@ function normalizeHull(inst, cls) {
 
   const key = cls.model || 'escort_hull';
   let cal = _hullCal.get(key);
+
+  /*
+   * A class may DECLARE its axes instead of having them guessed.
+   *
+   * The solve below ranks the bounding box and calls the second-longest
+   * dimension "up", which is true of every ship whose beam is a fraction of her
+   * length. A carrier is not that ship: her flight deck is 78 m across, so the
+   * only thing keeping the solve honest is that the masthead is taller than the
+   * deck is wide. That made the ART a hostage to the heuristic — the island had
+   * to be built tall enough to win an argument with the beam, and a correctly
+   * proportioned island would have laid the ship on her side.
+   *
+   * So: any class can state its own basis, and the guess stays for the hulls
+   * that have always been fine with it.
+   */
+  if (!cal && cls.modelAxes) {
+    inst.updateMatrixWorld(true);
+    const size = new THREE.Vector3();
+    new THREE.Box3().setFromObject(inst).getSize(size);
+    const a = cls.modelAxes;
+    cal = {
+      lenAxis: a.len, upAxis: a.up, beamAxis: a.beam,
+      upSign: a.upSign ?? 1, lenSign: a.lenSign ?? 1,
+      length: size[a.len],
+    };
+    _hullCal.set(key, cal);
+  }
+
   if (!cal) {
     inst.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(inst);
