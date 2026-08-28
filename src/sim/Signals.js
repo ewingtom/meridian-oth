@@ -1,4 +1,4 @@
-import { SIDE, DOMAIN, EMCON, ROE, NM, KNOT, clamp } from './constants.js';
+import { SIDE, DOMAIN, EMCON, ROE, IDENT, NM, KNOT, clamp } from './constants.js';
 
 /*
  * Signal traffic — the thing that turns a sandbox into a watch.
@@ -55,6 +55,9 @@ const MIN = 60;
  * happen to be asking for at that moment.
  */
 const SCHEDULED = [
+  // The air plan comes first, before anything else asks for a decision. It is
+  // how the player finds out there is a carrier and what a deck costs.
+  { kind: 'AIRPLAN', at: 4 * MIN },
   { kind: 'EMCON_WINDOW', at: 7 * MIN },
   { kind: 'WEAPONS_FREE', at: 22 * MIN },
   { kind: 'CONVOY', at: 40 * MIN },
@@ -289,7 +292,123 @@ function magFraction(u) {
   return worst;
 }
 
+/** The carrier, if she is still with us. */
+function flattop(w) {
+  return w.units.find(u => u.alive && u.side === SIDE.BLUE && u.deck && u.deck.catapults > 0);
+}
+
 export const GENERATORS = [
+  // ── the day's air plan ───────────────────────────────────────────────────
+  //
+  // This signal exists to teach the flight deck, and it teaches it the only way
+  // that works: by making the player spend it. Every option below is a real
+  // commitment of deck park and half an hour of ordnance work, and whichever
+  // one they pick is the one they will have when something happens. Nobody
+  // reads a tutorial about cyclic operations; everybody remembers arming the
+  // wrong thing once.
+  {
+    kind: 'AIRPLAN', cooldown: 1e9,
+    check(sys, w, now) {
+      const cv = flattop(w);
+      if (!cv) return null;
+      return new Signal({
+        kind: 'AIRPLAN', from: 'CTF-40', unit: cv, priority: 'PRIORITY', opened: now,
+        subject: 'AIR PLAN FOR THE FORENOON WATCH',
+        text: `${cv.name} has two fighters on alert and a cold deck behind them. Set your air plan. You have twelve deck spots and an ordnance crew who can only be in one place at a time.`,
+        detail: 'An anti-ship fit is thirty minutes of work per aircraft; early warning is three. Whatever you build now is what you will have when something happens, and you will not get to change your mind quickly.',
+        window: 420,
+        choices: [
+          {
+            key: 'AEW', label: 'EARLY WARNING — GET THE PICTURE UP',
+            hint: 'A Hawkeye ready in three minutes. Sees a sea-skimmer before it is ninety seconds out.',
+            reply: 'Rogering for early warning. Hawkeye on the cat in three.',
+            credit: 1,
+            apply(world) {
+              const cv = flattop(world);
+              cv?.deck?.prep('AEW_E2D', 'AEW', 1);
+            },
+          },
+          {
+            key: 'STRIKE', label: 'ARM A STRIKE — FOUR WITH ANTI-SHIP',
+            hint: 'Four Hornets with LRASM, ready in thirty minutes. Half your deck park, and the magazine pays for it.',
+            reply: 'Building a deckload. Four with anti-ship, thirty minutes.',
+            credit: 1,
+            apply(world) {
+              const cv = flattop(world);
+              cv?.deck?.prep('FA18E', 'STRIKE', 4);
+            },
+          },
+          {
+            key: 'CAP', label: 'REINFORCE THE CAP — FOUR MORE FIGHTERS',
+            hint: 'Four more air-to-air, ready in five minutes. Cheap and quick; does nothing about the SAG.',
+            reply: 'Four more fighters coming up on the air-to-air fit.',
+            apply(world) {
+              const cv = flattop(world);
+              cv?.deck?.prep('FA18E', 'CAP', 4);
+            },
+          },
+          {
+            key: 'COLD', label: 'HOLD — KEEP THE DECK COLD',
+            hint: 'Nothing committed. Everything is available and nothing is ready.',
+            reply: 'Deck stays cold. Alert fighters only.',
+            onExpire: 'No air plan from the flag. Deck stays cold, alert fighters only.',
+          },
+        ],
+      });
+    },
+  },
+
+  // ── the strike release ───────────────────────────────────────────────────
+  //
+  // The moment the game has been building toward: somebody has found the SAG
+  // well enough to shoot at it, and the flag says go. It only fires when there
+  // is a track good enough to be worth a sortie AND aircraft actually armed for
+  // it — a release order the player cannot act on is just noise.
+  {
+    kind: 'ALPHA', cooldown: 40 * MIN,
+    check(sys, w, now) {
+      const cv = flattop(w);
+      if (!cv || !cv.deck) return null;
+      const ready = cv.deck.count('READY', 'FA18E', 'STRIKE')
+        + cv.deck.count('AIRBORNE', 'FA18E', 'STRIKE');
+      if (ready < 2) return null;
+      const table = w.picture(SIDE.BLUE);
+      if (!table) return null;
+      const tgt = table.list.find(t => !t.faded && t.domain === DOMAIN.SURFACE
+        && t.identity === IDENT.HOSTILE && t.tq >= 4 && now - t.lastUpdate < 600);
+      if (!tgt) return null;
+      return new Signal({
+        kind: 'ALPHA', from: 'CTF-40', unit: cv, priority: 'FLASH', opened: now,
+        subject: 'STRIKE RELEASE',
+        text: `You are holding ${tgt.id} at track quality ${tgt.tq} and you have ${ready} armed. You are released to strike. Weapons release authority is yours.`,
+        detail: 'The track is what the missiles fly at. If custody lapses while they are in the air they will search the water where she used to be — keep somebody on her until they arrive.',
+        window: 300,
+        pin: { x: tgt.x, z: tgt.z },
+        choices: [
+          {
+            key: 'GO', label: 'EXECUTE — LAUNCH AND TASK THE PACKAGE',
+            hint: 'Everything armed for anti-ship goes, and goes at this track.',
+            reply: 'Executing. Package to the cats now.',
+            credit: 2,
+            apply(world) {
+              const cv = flattop(world);
+              if (!cv?.deck) return;
+              cv.deck.launch('FA18E', 'STRIKE', 99);
+              // The aircraft are tasked as they come off the deck.
+              world.pendingStrikeTrack = tgt;
+            },
+          },
+          {
+            key: 'WAIT', label: 'HOLD — WAIT FOR A BETTER TRACK',
+            hint: 'Keeps the ordnance. Costs you the shot if she opens the range.',
+            reply: 'Holding the package. We want a tighter fix first.',
+            onExpire: 'No release from the flag. Package stays on deck.',
+          },
+        ],
+      });
+    },
+  },
+
   // ── replenishment ────────────────────────────────────────────────────────
   {
     kind: 'RAS', cooldown: 25 * MIN,

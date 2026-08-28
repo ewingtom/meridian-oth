@@ -528,6 +528,19 @@ export class World {
     const brg = Math.atan2(bx - parent.x, bz - parent.z);
     const at = (r) => ({ x: parent.x + Math.sin(brg) * r, z: parent.z + Math.cos(brg) * r });
 
+    // A strike released by the flag is tasked as it comes off the deck, so the
+    // player does not have to re-designate the target for each aircraft in a
+    // package that takes two minutes to launch.
+    if ((role === 'STRIKE' || role === 'RECON') && this.pendingStrikeTrack) {
+      const t = this.pendingStrikeTrack;
+      if (!t.faded && this.time - t.lastUpdate < 900) {
+        u.strikeTrack = t;
+        u._ingressAt = 0;
+        return;
+      }
+      this.pendingStrikeTrack = null;
+    }
+
     if (role === 'CAP') {
       const p = at(55000);
       u.setOrbit(p.x, p.z, 18000);
