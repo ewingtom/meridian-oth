@@ -1,5 +1,9 @@
 import { SIDE, EMCON, ROE, IDENT, DOMAIN, NM, KNOT, AO_HALF, Rng, D2R, WEAPONS_QUALITY_TQ } from './constants.js';
 import { World } from './World.js';
+import {
+  HULL_NAMES, MERCHANT_NAMES, TRAWLER_NAMES,
+  BLUE_CATALOGUE, RED_CATALOGUE, posture,
+} from './forces.db.js';
 
 /*
  * OPERATION NORTH ANCHOR — the Kestrel Sea, 0515 local.
@@ -27,14 +31,6 @@ const RED_SHIP_NAMES = ['VOLNA', 'GROMKIY', 'BESSTRASHNY', 'SMETLIVY', 'ZORKIY']
 // which were also the names of two merchants out on the northern lane. Duplicate
 // contacts on the same plot, with the wrong prefix, in an identification scenario
 // where telling one neutral from another is the whole problem.
-const MERCHANT_NAMES = [
-  'MV NORDIC AURORA', 'MV KESTREL TRADER', 'MV BALTIC PIONEER', 'MV STAR OF LEITH',
-  'MV ORION CREST', 'MV SEVEN SISTERS', 'MV ANDALUSIA', 'MV CAPE FINISTERRE',
-  'MV THORVALD BANKE',
-];
-const TRAWLER_NAMES = [
-  'FV HAVFRUEN', 'FV NORDSTJERNEN', 'FV SILDEBERG', 'FV MAAGEN', 'FV BRISLING',
-];
 
 /*
  * A DIFFERENT SEA EVERY TIME.
@@ -49,32 +45,82 @@ const TRAWLER_NAMES = [
  * one can be replayed or handed to someone else). Pass nothing and you get a new
  * one.
  */
-export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
+/**
+ * The default order of battle — what Engage Now sails with, and what the editor
+ * opens pre-filled so the player is editing a real task force rather than
+ * assembling one from nothing.
+ */
+export function defaultSpec(seed = (Math.random() * 0x7fffffff) | 0) {
   const rng = new Rng(seed);
 
   /*
    * Where the enemy actually is, hidden from the player.
    *
    * This used to be a rectangle spanning x -150..130 km at z 165..265 km — which
-   * is always NORTH, so however the seed fell the answer to "which way do I
-   * send the Poseidon" was the same. Placing the group in POLAR coordinates
-   * about the objective instead puts it anywhere on a 150-degree arc, so the
-   * bearing is a real unknown and the search has to start from the intelligence
-   * rather than from memory.
+   * is always NORTH, so however the seed fell the answer to "which way do I send
+   * the Poseidon" was the same. Placing the group in POLAR coordinates about the
+   * objective instead puts it anywhere on a 150-degree arc, so the bearing is a
+   * real unknown and the search has to start from the intelligence rather than
+   * from memory.
    *
-   * The arc is centred north because that is where their airfield is — Volsk
-   * NAS lies northeast, and a surface action group that appeared to the
-   * southwest would have had to steam past the whole task force to get there.
-   * Within that constraint it is wide open.
+   * The arc is centred north because that is where their airfield is — a surface
+   * action group that appeared to the southwest would have had to steam past the
+   * whole task force to get there. Within that constraint it is wide open.
    */
   const OBJ = { x: 30000, z: 20000 };
   const approachBrg = (-75 + rng.range(0, 150)) * D2R;      // 285 through 000 to 075
   const approachRng = rng.range(185000, 295000);
   const redX = OBJ.x + Math.sin(approachBrg) * approachRng;
   const redZ = OBJ.z + Math.cos(approachBrg) * approachRng;
-  // They are closing the objective, with a few degrees of wander so the course
-  // is not a giveaway either.
+  // Closing the objective, with a few degrees of wander so the course is not a
+  // giveaway either.
   const redCourse = Math.atan2(OBJ.x - redX, OBJ.z - redZ) + rng.range(-0.22, 0.22);
+
+  return {
+    seed,
+    posture: 'COLD',
+    blue: {
+      x: -20000, z: -200000, course: 8 * D2R,
+      ships: [
+        { cls: 'DDG_FLIGHT_IIA', n: 2 },
+        { cls: 'FFG_CONSTELLATION', n: 2 },
+        { cls: 'CVN_FORD', n: 1 },
+        { cls: 'LPD', n: 1 },
+        { cls: 'AOE', n: 1 },
+        { cls: 'SSN_VIRGINIA', n: 1 },
+      ],
+    },
+    red: {
+      sag: {
+        x: redX, z: redZ, course: redCourse,
+        ships: [
+          { cls: 'CG_SLAVA', n: 1 },
+          { cls: 'DDG_UDALOY', n: 2 },
+          { cls: 'FFG_STEREGUSHCHY', n: 2 },
+        ],
+      },
+      subs: 1, mpa: 1, bombers: 4,
+    },
+    neutral: { merchants: 9, trawlers: 3 },
+  };
+}
+
+/**
+ * Build the world from a FORCE SPEC — or from a seed, which makes one.
+ *
+ * The split is what lets a pre-mission editor exist at all. Everything about
+ * which hulls are present and where they start now lives in a plain object that
+ * either the generator or the player can produce, and this function does not
+ * care which one handed it over.
+ */
+export function buildScenario(specOrSeed) {
+  const spec = (specOrSeed && typeof specOrSeed === 'object')
+    ? specOrSeed
+    : defaultSpec(specOrSeed === undefined ? undefined : specOrSeed);
+  const seed = spec.seed ?? 1;
+  const rng = new Rng(seed);
+  const OBJ = { x: 30000, z: 20000 };
+  const redX = spec.red.sag.x, redZ = spec.red.sag.z, redCourse = spec.red.sag.course;
 
   const scenario = {
     seed,
@@ -158,258 +204,266 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
   world.time = scenario.startTime;
   world.startedAt = scenario.startTime;
 
-  // ── BLUE: Task Force 44 ────────────────────────────────────────────────────
-  const tfX = -20000, tfZ = -200000;
-  const guide = world.spawn({
-    className: 'DDG_FLIGHT_IIA', side: SIDE.BLUE, id: 'DDG-121',
-    name: 'USS MERIDIAN', hullNo: 'DDG-121',
-    x: tfX, z: tfZ, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  guide.flagship = true;
+  // ── force generation ───────────────────────────────────────────────────────
+  spawnBlue(world, spec, scenario);
+  spawnRed(world, spec, scenario, rng);
+  spawnNeutrals(world, spec, scenario, rng);
+  applyPosture(world, spec, scenario);
 
-  const hvu1 = world.spawn({
-    className: 'LPD', side: SIDE.BLUE, id: 'LPD-31',
-    name: 'USS GRANITE BAY', hullNo: 'LPD-31',
-    x: tfX + 2600, z: tfZ - 5200, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  const hvu2 = world.spawn({
-    className: 'AOE', side: SIDE.BLUE, id: 'T-AKE-9',
-    name: 'USNS CAPE HATTERAS', hullNo: 'T-AKE-9',
-    x: tfX - 2900, z: tfZ - 6400, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
+  return world;
+}
 
-  // The carrier. She is the reason the task force is here and the reason it can
-  // reach past its own horizon — and she is also the single most valuable thing
-  // in the Kestrel Sea to the other side, which is what makes the screen a
-  // problem rather than a formality.
-  const cvn = world.spawn({
-    className: 'CVN_FORD', side: SIDE.BLUE, id: 'CVN-79',
-    name: 'USS KEARSARGE BAY', hullNo: 'CVN-79',
-    x: tfX + 2400, z: tfZ - 9800, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  // Aviation ordnance. The air wing draws from the ship's magazine, so this is
-  // the real limit on how many anti-ship sorties she can fly.
-  cvn.mags.LRASM = 24; cvn.magsMax.LRASM = 24;
-  cvn.mags.HARPOON = 16; cvn.magsMax.HARPOON = 16;
-  cvn.mags.AMRAAM = 96; cvn.magsMax.AMRAAM = 96;
-  cvn.mags.SIDEWINDER = 48; cvn.magsMax.SIDEWINDER = 48;
-  cvn.mags.MK54 = 18; cvn.magsMax.MK54 = 18;
-  cvn.mags.SONOBUOY = 400; cvn.magsMax.SONOBUOY = 400;
+/*
+ * WHERE EACH HULL STANDS.
+ *
+ * A screen is not a shape, it is a set of assignments — so the layout is a
+ * table of stations by role and the Nth ship of a role takes the Nth station.
+ * With the default order of battle this reproduces the hand-placed formation
+ * exactly: frigates on the bows at 22 km, the second destroyer astern at 12,
+ * the high-value units on the disengaged quarter, the carrier tucked inside the
+ * screen rather than behind it because she has to be able to turn into the wind
+ * and everybody else conforms to her. Add a sixth escort and it keeps working,
+ * which is the entire reason this is a table and not five literals.
+ */
+const STATIONS = {
+  ESCORT: [
+    { brg: -35, r: 22000 }, { brg: 35, r: 22000 }, { brg: 180, r: 12000 },
+    { brg: -105, r: 20000 }, { brg: 105, r: 20000 }, { brg: 0, r: 26000 },
+    { brg: -150, r: 17000 }, { brg: 150, r: 17000 },
+  ],
+  INNER: [{ brg: 175, r: 9000 }, { brg: 195, r: 11000 }],
+  HVU: [
+    { brg: 160, r: 15000 }, { brg: -160, r: 16000 },
+    { brg: 148, r: 19000 }, { brg: -148, r: 20000 },
+  ],
+};
 
-  const ffg1 = world.spawn({
-    className: 'FFG_CONSTELLATION', side: SIDE.BLUE, id: 'FFG-64',
-    name: 'USS SENTINEL', hullNo: 'FFG-64',
-    x: tfX - 14000, z: tfZ + 9000, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  const ffg2 = world.spawn({
-    className: 'FFG_CONSTELLATION', side: SIDE.BLUE, id: 'FFG-67',
-    name: 'USS VANGUARD', hullNo: 'FFG-67',
-    x: tfX + 15000, z: tfZ + 8000, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  const ddg2 = world.spawn({
-    className: 'DDG_FLIGHT_IIA', side: SIDE.BLUE, id: 'DDG-118',
-    name: 'USS CUTLASS', hullNo: 'DDG-118',
-    x: tfX + 1000, z: tfZ - 14000, heading: 8 * D2R, speed: 16 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
-  });
-  ddg2.mags.LRASM = 16;
-  ddg2.magsMax.LRASM = 16;
+/** Flatten a composition list into one entry per hull, in catalogue order. */
+function roster(list, catalogue) {
+  const out = [];
+  for (const entry of list || []) {
+    const meta = catalogue.find(c => c.cls === entry.cls);
+    if (!meta) continue;
+    for (let i = 0; i < (entry.n || 0); i++) out.push({ cls: entry.cls, role: meta.role, i });
+  }
+  return out;
+}
 
-  // Screen stations relative to the guide. A real screen is assigned by threat
-  // axis; here the ASW-capable frigates lead and the AAW destroyers cover the HVUs.
-  ffg1.station = { guide, relBearing: -35 * D2R, range: 22000 };
-  ffg2.station = { guide, relBearing: 35 * D2R, range: 22000 };
-  ddg2.station = { guide, relBearing: 180 * D2R, range: 12000 };
-  // The high value units sit well behind the screen, on the disengaged quarter.
-  hvu1.station = { guide, relBearing: 160 * D2R, range: 15000 };
-  hvu2.station = { guide, relBearing: -160 * D2R, range: 16000 };
-  // The carrier keeps station inside the screen, not behind it — she has to be
-  // able to turn into the wind to fly, and the screen conforms to her.
-  cvn.station = { guide, relBearing: 175 * D2R, range: 9000 };
+/** Pull the next unused name for a class. */
+function nameFor(cls, used) {
+  const pool = HULL_NAMES[cls] || [['UNNAMED', null]];
+  const n = (used[cls] = (used[cls] || 0) + 1) - 1;
+  const [name, hull] = pool[n % pool.length];
+  return { name: n < pool.length ? name : `${name} (${n + 1})`, hullNo: hull };
+}
 
-  // Two fighters sit alert on the deck, armed and spotted. A carrier does not
-  // start a watch with a cold deck, and it also means the flight deck is not a
-  // half-hour wall the first time the player opens it — the mechanic explains
-  // itself with something already in it.
+function spawnBlue(world, spec, scenario) {
+  const b = spec.blue;
+  const course = b.course;
+  const used = {};
+  const all = roster(b.ships, BLUE_CATALOGUE);
+
+  // The guide is the first escort — the flagship, at the centre of the screen.
+  const guideIdx = all.findIndex(s => s.role === 'ESCORT');
+  const order = guideIdx >= 0 ? [all[guideIdx], ...all.filter((_, i) => i !== guideIdx)] : all;
+
+  // Station assignment is not spawn order. The frigates carry the towed arrays,
+  // so they take the forward bows and listen; the destroyers cover the HVUs.
+  const stationRank = new Map();
+  const escorts = order.filter((s, i) => i > 0 && s.role === 'ESCORT');
+  escorts
+    .map((s, i) => ({ s, i, k: (BLUE_CATALOGUE.find(c => c.cls === s.cls)?.screen ?? 1) }))
+    .sort((a, b) => a.k - b.k || a.i - b.i)
+    .forEach((e, rank) => stationRank.set(e.s, rank));
+
+  const taken = { ESCORT: 0, INNER: 0, HVU: 0 };
+  let guide = null;
+  const hvus = [], created = [];
+
+  for (const s of order) {
+    const nm = nameFor(s.cls, used);
+    let station = null, x = b.x, z = b.z;
+    if (guide) {
+      const table = STATIONS[s.role];
+      if (table) {
+        const idx = s.role === 'ESCORT' ? stationRank.get(s) : taken[s.role]++;
+        const st = table[idx % table.length];
+        station = { relBearing: st.brg * D2R, range: st.r };
+        const brg = course + station.relBearing;
+        x = b.x + Math.sin(brg) * st.r;
+        z = b.z + Math.cos(brg) * st.r;
+      } else if (s.role === 'SUB') {
+        // Detached and well ahead — a submarine in company is not a screen unit.
+        x = b.x + 6000; z = b.z + 78000;
+      }
+    }
+    const isSub = s.role === 'SUB';
+    const u = world.spawn({
+      className: s.cls, side: SIDE.BLUE, id: nm.hullNo || `BLUE-${created.length}`,
+      name: nm.name, hullNo: nm.hullNo,
+      x, z, heading: course, speed: (isSub ? 6 : 16) * KNOT,
+      alt: isSub ? -120 : 0,
+      emcon: isSub ? EMCON.SILENT : EMCON.PASSIVE, roe: ROE.TIGHT,
+    });
+    if (isSub) u.depthOrdered = -120;
+    if (!guide) { guide = u; u.flagship = true; }
+    else if (station) u.station = { guide, ...station };
+    if (s.role === 'HVU') hvus.push(u);
+    // Anti-ship rounds ride in the destroyers' cells as well as the flagship's.
+    if (s.cls === 'DDG_FLIGHT_IIA' && created.length) { u.mags.LRASM = 16; u.magsMax.LRASM = 16; }
+    if (s.cls === 'CVN_FORD') {
+      // Aviation ordnance. The air wing draws from the ship's magazine, so this
+      // is the real limit on how many anti-ship sorties she can fly.
+      const load = { LRASM: 24, HARPOON: 16, AMRAAM: 96, SIDEWINDER: 48, MK54: 18, SONOBUOY: 400 };
+      for (const [k, v] of Object.entries(load)) { u.mags[k] = v; u.magsMax[k] = v; }
+    }
+    created.push(u);
+  }
+
   // Alert aircraft. A carrier does not start a watch with a cold deck, and an
-  // escort keeps a Seahawk armed on the pad — which is also what keeps the
-  // LAUNCH HELO button doing what it has always done the first time it is
-  // pressed, now that every hangar goes through the deck scheduler.
+  // escort keeps a Seahawk armed on the pad — which is what keeps LAUNCH HELO
+  // doing what it has always done the first time it is pressed, now that every
+  // hangar goes through the deck scheduler.
   const alert = (ship, type, ld, n) => {
     if (!ship.deck) return;
     ship.deck.prep(type, ld, n);
-    for (const f of ship.deck.frames) {
-      if (f.state === 'PREPPING') { f.state = 'READY'; f.timer = 0; }
-    }
+    for (const f of ship.deck.frames) if (f.state === 'PREPPING') { f.state = 'READY'; f.timer = 0; }
     ship.deck.log.length = 0;
   };
-  alert(cvn, 'FA18E', 'CAP', 2);
-  for (const u of world.units) {
-    if (u.side === SIDE.BLUE && u.deck && u.deck.catapults === 0) alert(u, 'MH60R', 'ASW', 1);
+  for (const u of created) {
+    if (!u.deck) continue;
+    if (u.deck.catapults > 0) alert(u, 'FA18E', 'CAP', 2);
+    else alert(u, 'MH60R', 'ASW', 1);
   }
 
-  const ssn = world.spawn({
-    className: 'SSN_VIRGINIA', side: SIDE.BLUE, id: 'SSN-796',
-    name: 'USS RAVENNA', hullNo: 'SSN-796',
-    x: tfX + 6000, z: tfZ + 78000, heading: 8 * D2R, speed: 6 * KNOT,
-    alt: -120, emcon: EMCON.SILENT, roe: ROE.TIGHT,
-  });
-  ssn.depthOrdered = -120;
-
-  // One Poseidon already on station — a hint, in the shape of an asset, that the
-  // answer to "I cannot see" is altitude.
+  // Shore-based aviation. Two Poseidons — one on station as a hint in the shape
+  // of an asset that the answer to "I cannot see" is altitude, and one held back
+  // because losing the first to a SAM envelope is a common and instructive
+  // mistake, and a scenario where it is unrecoverable teaches only to reload.
+  const air = [];
   const mpa = world.spawn({
-    className: 'MPA_P8', side: SIDE.BLUE, id: 'VP-71',
-    name: 'POSEIDON 71',
-    x: tfX - 30000, z: tfZ + 40000, heading: 15 * D2R,
-    alt: 8000, emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
+    className: 'MPA_P8', side: SIDE.BLUE, id: 'VP-71', name: 'POSEIDON 71',
+    x: b.x - 25000, z: b.z + 55000, heading: course, alt: 8000,
+    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
   });
   mpa.fuel = mpa.maxFuel * 0.86;
-  mpa.setOrbit(tfX, tfZ + 60000, 26000);
-  // On station with the task force, not up-threat. Getting her north is the
-  // player's first decision and the first place the horizon lesson bites.
-  mpa.x = tfX - 25000; mpa.z = tfZ + 55000;
-
-  // A second Poseidon, held back. Losing the first one to a SAM envelope is a
-  // very common and very instructive mistake, and a scenario where that mistake
-  // is unrecoverable teaches nothing except to reload.
+  mpa.setOrbit(b.x, b.z + 60000, 26000);
+  air.push(mpa);
   const mpa2 = world.spawn({
-    className: 'MPA_P8', side: SIDE.BLUE, id: 'VP-72',
-    name: 'POSEIDON 72',
-    x: tfX + 40000, z: tfZ - 60000, heading: 10 * D2R,
-    alt: 8000, emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
+    className: 'MPA_P8', side: SIDE.BLUE, id: 'VP-72', name: 'POSEIDON 72',
+    x: b.x + 40000, z: b.z - 60000, heading: course, alt: 8000,
+    emcon: EMCON.PASSIVE, roe: ROE.TIGHT,
   });
-  mpa2.setOrbit(tfX + 30000, tfZ - 40000, 24000);
+  mpa2.setOrbit(b.x + 30000, b.z - 40000, 24000);
+  air.push(mpa2);
 
-  // Airborne early warning.
-  //
-  // This aircraft is the answer to the central problem of task-force air
-  // defence: a ship's radar horizon against a sea-skimmer is about thirty
-  // kilometres, which is ninety seconds, and the only way to buy more is to lift
-  // the radar off the sea. It also means the force can shoot on the Hawkeye's
-  // picture while remaining in EMCON BRAVO itself — an escort that has never
-  // radiated firing on a track somebody else is holding is the kill web doing
-  // exactly what it exists to do.
+  // Airborne early warning: the answer to the central problem of task-force air
+  // defence. A ship's radar horizon against a sea-skimmer is about thirty
+  // kilometres, which is ninety seconds; the only way to buy more is to lift the
+  // radar off the sea. It also lets the force shoot on the Hawkeye's picture
+  // while staying silent itself.
   const aew = world.spawn({
-    className: 'AEW_E2D', side: SIDE.BLUE, id: 'VAW-121',
-    name: 'HAWKEYE 601',
-    x: tfX - 8000, z: tfZ + 22000, heading: 8 * D2R,
-    alt: 9000, emcon: EMCON.FULL, roe: ROE.TIGHT,
+    className: 'AEW_E2D', side: SIDE.BLUE, id: 'VAW-121', name: 'HAWKEYE 601',
+    x: b.x - 8000, z: b.z + 22000, heading: course, alt: 9000,
+    emcon: EMCON.FULL, roe: ROE.TIGHT,
   });
-  aew.setOrbit(tfX, tfZ + 30000, 22000);
+  aew.setOrbit(b.x, b.z + 30000, 22000);
+  air.push(aew);
 
-  // ── RED: Volsk Northern Fleet SAG OTVAZHNY ────────────────────────────────
-  const cg = world.spawn({
-    className: 'CG_SLAVA', side: SIDE.RED, id: 'RED-CG',
-    name: 'VOLNA', x: redX, z: redZ, heading: redCourse, speed: 15 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.FREE,
-  });
-  const rd1 = world.spawn({
-    className: 'DDG_UDALOY', side: SIDE.RED, id: 'RED-DD1',
-    name: 'GROMKIY', x: redX - 11000, z: redZ + 6000, heading: redCourse, speed: 15 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.FREE,
-  });
-  const rd2 = world.spawn({
-    className: 'DDG_UDALOY', side: SIDE.RED, id: 'RED-DD2',
-    name: 'BESSTRASHNY', x: redX + 12500, z: redZ + 5000, heading: redCourse, speed: 15 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.FREE,
-  });
-  const rf1 = world.spawn({
-    className: 'FFG_STEREGUSHCHY', side: SIDE.RED, id: 'RED-FF1',
-    name: 'SMETLIVY', x: redX - 4000, z: redZ - 12000, heading: redCourse, speed: 15 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.FREE,
-  });
-  const rf2 = world.spawn({
-    className: 'FFG_STEREGUSHCHY', side: SIDE.RED, id: 'RED-FF2',
-    name: 'ZORKIY', x: redX + 6000, z: redZ - 13500, heading: redCourse, speed: 15 * KNOT,
-    emcon: EMCON.PASSIVE, roe: ROE.FREE,
-  });
+  world.blueGuide = guide;
+  world.blueHvu = hvus;
+  world.blueUnitsOrder = [...created, ...air];
+}
 
-  const rsub = world.spawn({
-    className: 'SSGN_AKULA', side: SIDE.RED, id: 'RED-SS',
-    // Its own bearing, independent of the surface group — a submarine that always
-    // sat in the same box was the one contact the player never had to search for.
-    name: 'B-471 KRASNODAR',
-    x: OBJ.x + Math.sin(rng.range(-2.4, 2.4)) * rng.range(40000, 130000),
-    z: OBJ.z + Math.cos(rng.range(-2.4, 2.4)) * rng.range(30000, 110000),
-    heading: Math.PI, speed: 5 * KNOT, alt: -150, emcon: EMCON.SILENT, roe: ROE.FREE,
-  });
-  rsub.depthOrdered = -150;
-
-  const rmpa = world.spawn({
-    className: 'MPA_BEAR', side: SIDE.RED, id: 'RED-MPA',
-    name: 'MEDVED 04',
-    x: redX + rng.range(-120000, 120000), z: redZ + rng.range(50000, 130000),
-    heading: Math.PI, alt: 7000, emcon: EMCON.FULL, roe: ROE.TIGHT,
+function spawnRed(world, spec, scenario, rng) {
+  const r = spec.red;
+  const used = {};
+  const sagShips = roster(r.sag.ships, RED_CATALOGUE);
+  // A loose box, lead ship at the centre. Deterministic offsets so a given spec
+  // always produces the same formation.
+  const OFF = [
+    [0, 0], [-11000, 6000], [12500, 5000], [-4000, -12000], [6000, -13500],
+    [15000, -4000], [-15000, -6000], [3000, 14000], [-8000, 15000],
+  ];
+  const sag = [];
+  sagShips.forEach((s, i) => {
+    const nm = nameFor(s.cls, used);
+    const [ox, oz] = OFF[i % OFF.length];
+    sag.push(world.spawn({
+      className: s.cls, side: SIDE.RED, id: `RED-S${i}`, name: nm.name,
+      x: r.sag.x + ox, z: r.sag.z + oz, heading: r.sag.course, speed: 15 * KNOT,
+      emcon: EMCON.PASSIVE, roe: ROE.FREE,
+    }));
   });
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < (r.subs || 0); i++) {
+    // Its own bearing, independent of the surface group — a submarine that
+    // always sat in the same box was the one contact nobody had to search for.
+    const sub = world.spawn({
+      className: 'SSGN_AKULA', side: SIDE.RED, id: `RED-SS${i}`,
+      name: nameFor('SSGN_AKULA', used).name,
+      x: scenario.objectivePoint.x + Math.sin(rng.range(-2.4, 2.4)) * rng.range(40000, 130000),
+      z: scenario.objectivePoint.z + Math.cos(rng.range(-2.4, 2.4)) * rng.range(30000, 110000),
+      heading: Math.PI, speed: 5 * KNOT, alt: -150, emcon: EMCON.SILENT, roe: ROE.FREE,
+    });
+    sub.depthOrdered = -150;
+  }
+
+  for (let i = 0; i < (r.mpa || 0); i++) {
+    world.spawn({
+      className: 'MPA_BEAR', side: SIDE.RED, id: `RED-MPA${i}`,
+      name: nameFor('MPA_BEAR', used).name,
+      x: r.sag.x + rng.range(-120000, 120000), z: r.sag.z + rng.range(50000, 130000),
+      heading: Math.PI, alt: 7000, emcon: EMCON.FULL, roe: ROE.TIGHT,
+    });
+  }
+
+  for (let i = 0; i < (r.bombers || 0); i++) {
     const b = world.spawn({
       className: 'BOMBER_BACKFIRE', side: SIDE.RED, id: `RED-BMR${i}`,
-      name: `RAIDER ${i + 1}`,
+      name: nameFor('BOMBER_BACKFIRE', used).name,
       x: scenario.redAirbase.x + i * 3000, z: scenario.redAirbase.z,
-      heading: Math.PI, alt: 10500, emcon: EMCON.SILENT, roe: ROE.TIGHT,
-      speed: 260,
+      heading: Math.PI, alt: 10500, emcon: EMCON.SILENT, roe: ROE.TIGHT, speed: 260,
     });
     b.fuel = b.maxFuel;
   }
 
-  // ── NEUTRAL shipping ───────────────────────────────────────────────────────
-  // The identification problem, in physical form. Three of these will sit inside
-  // your best ESM cut on the SAG at some point in the next two hours.
-  // Real lanes, not scatter. Merchant traffic in any sea follows a handful of
-  // great-circle routes between ports, so the neutrals here run on three of
-  // them — and one of those lanes passes straight through the intel box, which
-  // is precisely why the identification problem is a problem.
+  world.redSag = sag;
+}
+
+function spawnNeutrals(world, spec, scenario, rng) {
   /*
    * Lanes have to cross the track the task group is actually going to steam.
    *
-   * These were laid out against the corners of the area of operations, and the
-   * transit runs from (-20000, -200000) to POINT OSCAR at (30000, 20000): about
-   * 225 km on a course of 013. Measured against that corridor, the nearest
-   * neutral in the whole scenario passed 71 km abeam and most were 160 to 326 km
-   * off. In four hours of steaming the player met no shipping at all.
+   * These were once laid out against the corners of the area of operations, and
+   * measured against the real transit corridor the nearest neutral in the whole
+   * scenario passed 71 km abeam. Everything downstream depended on it: the
+   * signal that fires when a merchant closes inside the screen needs one within
+   * 26 km of a high-value unit, and neither that nor the fishing-fleet condition
+   * was ever satisfiable, so the sea was empty and five generators never fired.
    *
-   * Everything downstream depended on it. The signal that fires when a merchant
-   * closes inside the screen needs one within 26 km of a high-value unit; the
-   * fishing-fleet signal needs two contacts in a cone ahead. Neither condition
-   * was ever satisfiable, so five of the twelve generators never fired once in a
-   * four-hour sortie and the sea was empty.
-   *
-   * A task group does not get a private ocean. It transits the lanes that are
-   * there, and having to sort a freighter from a warship at forty miles is the
-   * problem this game is about — so one lane now crosses the corridor early,
-   * another crosses it late, and the third stays out wide as background traffic.
+   * A task group does not get a private ocean. One lane crosses the corridor
+   * early, another late, and the third stays out wide as background traffic.
    */
   const LANES = [
-    // Crosses the base course at about (2000, -120000), a third of the way up.
     { name: 'KESTREL PASSAGE', a: { x: -AO_HALF * 0.62, z: -AO_HALF * 0.52 }, b: { x: AO_HALF * 0.70, z: -AO_HALF * 0.16 } },
-    // Crosses again on the approach to POINT OSCAR, around (22000, -20000).
     { name: 'NORTHERN APPROACH', a: { x: -AO_HALF * 0.80, z: AO_HALF * 0.02 }, b: { x: AO_HALF * 0.86, z: -AO_HALF * 0.24 } },
-    // Background traffic, well clear to the east.
     { name: 'COASTAL', a: { x: AO_HALF * 0.42, z: AO_HALF * 0.55 }, b: { x: AO_HALF * 0.95, z: -AO_HALF * 0.30 } },
   ];
   world.lanes = LANES;
-  for (let i = 0; i < 12; i++) {
-    const isTrawler = i >= 9;
+
+  const nMerch = spec.neutral.merchants, nTrawl = spec.neutral.trawlers;
+  // The fishing bank sits on the shelf edge the group crosses about an hour
+  // out, which is exactly the kind of place a warship at twenty knots has to
+  // think about gear in the water.
+  const bank = { x: spec.blue.x + 11000, z: spec.blue.z + 48000 };
+
+  for (let i = 0; i < nMerch + nTrawl; i++) {
+    const isTrawler = i >= nMerch;
     let x, z, hdg;
     if (isTrawler) {
-      // Fishing works grounds, not routes: a loose cluster over a bank.
-      //
-      // The bank was at (6000, 52000) — past POINT OSCAR, and 250 km up the
-      // track from where the task group starts. Nobody ever saw it. A bank sits
-      // where the bottom brings the fish up, and this one is on the shelf edge
-      // the group crosses about an hour out, which is exactly the kind of place a
-      // warship at twenty knots has to think about gear in the water.
-      const bx = -9000, bz = -152000;
-      x = bx + rng.range(-15000, 15000);
-      z = bz + rng.range(-11000, 11000);
+      x = bank.x + rng.range(-15000, 15000);
+      z = bank.z + rng.range(-11000, 11000);
       hdg = rng.range(0, 360) * D2R;
     } else {
       const lane = LANES[i % LANES.length];
@@ -426,10 +480,9 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
       hdg = Math.atan2(rev ? -along.x : along.x, rev ? -along.z : along.z);
     }
     const m = world.spawn({
-      className: isTrawler ? 'TRAWLER' : 'MERCHANT', side: SIDE.NEUTRAL,
-      id: `NEU-${i}`,
+      className: isTrawler ? 'TRAWLER' : 'MERCHANT', side: SIDE.NEUTRAL, id: `NEU-${i}`,
       name: isTrawler
-        ? TRAWLER_NAMES[(i - 9) % TRAWLER_NAMES.length]
+        ? TRAWLER_NAMES[(i - nMerch) % TRAWLER_NAMES.length]
         : MERCHANT_NAMES[i % MERCHANT_NAMES.length],
       x, z, heading: hdg, speed: (isTrawler ? 5 : 15) * KNOT,
       emcon: EMCON.RESTRICTED, roe: ROE.HOLD,
@@ -437,13 +490,46 @@ export function buildScenario(seed = (Math.random() * 0x7fffffff) | 0) {
     m.orderCourse(hdg, m.cls.maxSpeed * (isTrawler ? 0.35 : 0.8));
     m.lane = isTrawler ? 'FISHING' : LANES[i % LANES.length].name;
   }
+}
 
-  world.blueGuide = guide;
-  world.blueHvu = [hvu1, hvu2];
-  world.blueUnitsOrder = [guide, ddg2, ffg1, ffg2, hvu1, hvu2, ssn, mpa, mpa2, aew];
-  world.redSag = [cg, rd1, rd2, rf1, rf2];
+/**
+ * How hot it starts.
+ *
+ * COLD is the game as designed: a search problem where the first decision is
+ * whether to radiate. WARM has already been found — a Bear is overhead and the
+ * intelligence is ninety minutes old rather than five and a half hours. HOT
+ * skips the search entirely and asks a different question, because the salvo
+ * is already in the air and the only thing that matters is the next four
+ * minutes.
+ */
+function applyPosture(world, spec, scenario) {
+  const p = posture(spec.posture);
+  for (const u of world.units) {
+    if (u.side === SIDE.BLUE && !u.isAir) {
+      u.ordered.roe = p.blueRoe === 'ROE_FREE' ? ROE.FREE : ROE.TIGHT;
+      if (p.blueEmcon === 'FULL') u.setEmcon(EMCON.FULL);
+    } else if (u.side === SIDE.RED && !u.isAir && !u.isSub) {
+      if (p.redEmcon === 'FULL') u.setEmcon(EMCON.FULL);
+      else if (p.redEmcon === 'RESTRICTED') u.setEmcon(EMCON.RESTRICTED);
+    }
+  }
+  scenario.intelBox.age = p.intelAgeH * 3600;
+  scenario.posture = p.id;
 
-  return world;
+  if (!p.redKnowsYou) return;
+  // He has a solution on the task force. Hand the red commander the truth
+  // rather than making him search for it.
+  world.redKnowsBlue = { x: world.blueGuide.x, z: world.blueGuide.z, t: world.time };
+
+  if (p.opening === 'SHADOWED') {
+    // Put the Bear where a shadower would be: overhead, and already radiating.
+    const bear = world.units.find(u => u.alive && u.className === 'MPA_BEAR');
+    if (bear) {
+      bear.x = world.blueGuide.x + 60000;
+      bear.z = world.blueGuide.z + 40000;
+      bear.setOrbit(world.blueGuide.x, world.blueGuide.z, 55000);
+    }
+  }
 }
 
 /**
