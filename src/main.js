@@ -982,6 +982,10 @@ class Game {
       <p>Find the surface action group before it finds you. Build a firing solution out of
       whatever sensors you can put over the horizon, keep custody of it while your missiles
       are in the air, and get GRANITE BAY to POINT OSCAR.</p>
+      <p>KEARSARGE BAY is your reach. Her wing can put weapons where no launcher in this
+      force can, but a deck is a queue — an anti-ship fit is thirty minutes of ordnance work
+      per aircraft, and nothing is catapulted while somebody is landing. Decide what you are
+      building before you know you need it.</p>
       <p style="color:var(--dim);font-size:11px">Positive identification before launch. There is neutral
       traffic all over this water, and a seeker cannot tell a frigate from a container ship.</p>
     `;
@@ -1005,6 +1009,16 @@ class Game {
         <div><b>G</b> set course mode</div><div><b>Space</b> pause · number keys on the bar for time</div>
         <div><b>T</b> toggle kill web</div><div><b>R</b> toggle sensor rings</div>
       </div>
+      <h3 style="margin-top:20px">THE FLIGHT DECK</h3>
+      <p style="font-size:11.5px">Select the carrier — or any ship with a hangar — and open
+      <b style="color:var(--accent)">FLIGHT DECK</b>. Choose a loadout to arm airframes; the timer next to it is
+      how long the ordnance crew needs. Armed aircraft occupy deck spots, so what you build now is in the way
+      of what you want later, and nothing launches while an aircraft is landing.</p>
+      <p style="font-size:11.5px">Fighters take a barrier station and engage on their own. To send a strike,
+      designate a hostile surface contact and press <b style="color:var(--accent)">TASK STRIKE</b>. The package flies at
+      the TRACK, not the ship — so how well you are holding her decides how far out they can shoot. A good
+      track means they release at two hundred miles and go home; a poor one means they fly all the way in.</p>
+
       <h3 style="margin-top:20px">DOCTRINE — THE FOUR THINGS THAT DECIDE THIS FIGHT</h3>
       <p><b style="color:var(--accent)">1 · The horizon, not the radar.</b> A mast at 30 m sees another ship at
       21 nautical miles no matter how good the radar is. An aircraft at 28,000 feet sees the same ship at
