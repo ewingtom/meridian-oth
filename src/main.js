@@ -265,15 +265,20 @@ class Game {
           // minutes. At 64x compression those four minutes are three and a half
           // real seconds, so the player watched decisions expire against them
           // faster than the card could be read, and the debrief then marked them
-          // down for it. An art review found exactly that pattern.
+          // down for it.
           //
           // Time compression is the player's tool for skipping the empty ocean;
           // the moment something actually asks them a question, the empty ocean
-          // is over. Drop to a scale where the window is a real minute or more.
-          if (ev.scored && this.timeScale > 8) {
-            this.setTimeScale(4);
-            this.hud.pushAlert('TIME COMPRESSION REDUCED — DECISION PENDING', 'info', 3);
-          }
+          // is over. So the clock stops at 1x while the card is up — and, the
+          // part that was missing, IT GOES BACK AFTERWARDS. It used to drop to
+          // 4x and simply stay there, so a watch spent at 64x was silently
+          // ratcheted down to a crawl by its own signal traffic and the player
+          // had to keep reaching for the time bar to undo it.
+          if (ev.scored) this._holdTimeForDecision();
+          break;
+        }
+        case 'SIGNAL_ANSWERED': {
+          this._releaseTimeAfterDecision();
           break;
         }
         case 'ILLUM': case 'SEEKER': case 'TORPEDO': {
@@ -1398,6 +1403,37 @@ class Game {
     $('perf-res').textContent = scale < 0.995 ? `${Math.round(scale * 100)}% res` : 'native';
     box.classList.toggle('warn', fps < 55 && fps >= 40);
     box.classList.toggle('bad', fps < 40);
+  }
+
+  /**
+   * Stop the clock while a decision is on the table, and give the player back
+   * exactly the speed they were running at once it is off.
+   *
+   * Two things make this less trivial than saving a number. Several decisions
+   * can be open at once, so the speed is only restored when the LAST one is
+   * resolved — otherwise answering the first of three hands the player 64x with
+   * two cards still up. And the player may deliberately change speed while
+   * reading; that is their call, so the restore only fires if the scale is
+   * still the one this put them at. Anything else means they have taken the
+   * wheel and it is not ours to move.
+   */
+  _holdTimeForDecision() {
+    if (this._decisionHold) return;         // already stopped for an earlier card
+    if (this.timeScale <= 1) return;        // nothing to give back
+    this._decisionHold = { was: this.timeScale, set: 1 };
+    this.setTimeScale(1);
+    this.hud.pushAlert('TIME 1× — DECISION PENDING', 'info', 3);
+  }
+
+  _releaseTimeAfterDecision() {
+    const h = this._decisionHold;
+    if (!h) return;
+    // Wait for the stack to clear.
+    if (this.world.signals.active.some(s => !s.resolved && s.choices?.length)) return;
+    this._decisionHold = null;
+    if (this.timeScale !== h.set) return;   // the player took the wheel; leave it
+    this.setTimeScale(h.was);
+    this.hud.pushAlert(`TIME ${h.was}× RESUMED`, 'info', 2.5);
   }
 
   /** Switch graphics preset live. */

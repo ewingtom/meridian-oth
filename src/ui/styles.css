@@ -83,24 +83,26 @@ html, body {
   #hud { font-size: 11.5px; }
   #left { width: 250px; }
   #right { width: 276px; }
-  #signals { width: 296px; }
 }
 @media (max-width: 1040px) {
   #hud { font-size: 11px; }
   #left { width: 216px; }
   #right { width: 238px; }
   #topbar .seg { padding: 0 9px; font-size: 10px; }
-  #signals { width: 258px; }
 }
 @media (max-width: 880px) {
   #left, #right { top: 50px; bottom: 96px; width: 208px; }
-  #signals { top: 50px; right: 218px; width: 220px; }
   #topbar .seg.hide-sm { display: none; }
 }
 @media (max-width: 620px) {
-  #left { display: none; }
+  /* The left column goes, but the DECISIONS in it must not — they now live
+     here, and a hidden decision expires against the player unanswered. Keep the
+     column as a signals-only strip, and let it collapse to nothing when there
+     is no card so it is not a permanent gutter. */
+  #left { width: min(210px, 56vw); pointer-events: none; }
+  #left #force, #left #comms { display: none; }
+  #left #signals { pointer-events: auto; max-height: 100%; }
   #right { width: min(200px, 54vw); }
-  #signals { right: 4px; top: 200px; width: min(190px, 52vw); }
   #bottom { font-size: 9.5px; }
   #hint-bar { font-size: 9.5px; max-width: 92vw; }
 }
@@ -339,13 +341,24 @@ button.act.danger:hover:not(:disabled) { background: rgba(255,95,86,0.26); color
 @keyframes alertin { from { opacity: 0; transform: translateY(-8px) } }
 
 /* ── signal traffic: decisions the watch is waiting on ─────────────────── */
-/* Docked over the SEA, inboard of the contact panel. A decision card that
-   covers the tactical picture takes away the display the decision is about at
-   exactly the moment it is needed. */
+/*
+ * In the LEFT COLUMN, above the fleet net, because that is what these are.
+ *
+ * They used to float over the sea inboard of the contact panel, on the theory
+ * that a decision card must not cover the tactical picture. It covered the
+ * PLOT instead — sitting exactly where contacts to the north-east appear — so
+ * the card asking you about a surface contact hid the surface contacts. There
+ * is no good place to put a panel on top of the chart; the fix is not to put it
+ * on top of the chart.
+ *
+ * The left column already carries the signal traffic these belong to, so an
+ * open decision now sits at the top of it and the fleet-net log flows beneath.
+ * When nothing is pending the container is empty and costs no height.
+ */
 #signals {
-  position: absolute; top: 52px; right: 338px;
   display: flex; flex-direction: column; gap: 8px; align-items: stretch;
-  width: 330px; pointer-events: auto; z-index: 6;
+  flex: 0 0 auto; min-height: 0; pointer-events: auto;
+  max-height: 62%; overflow-y: auto;
 }
 .sig {
   font-family: var(--mono);
@@ -357,9 +370,9 @@ button.act.danger:hover:not(:disabled) { background: rgba(255,95,86,0.26); color
   animation: sigin .34s cubic-bezier(.2,.8,.3,1);
   overflow: hidden;
 }
-@keyframes sigin { from { opacity: 0; transform: translateX(26px) } }
+@keyframes sigin { from { opacity: 0; transform: translateX(-22px) } }
 .sig.out { animation: sigout .3s ease-in forwards; }
-@keyframes sigout { to { opacity: 0; transform: translateX(26px); max-height: 0; } }
+@keyframes sigout { to { opacity: 0; transform: translateX(-22px); max-height: 0; } }
 .sig.flash { border-left-color: #ff5f56; }
 .sig.priority { border-left-color: var(--warn); }
 .sig-h {
