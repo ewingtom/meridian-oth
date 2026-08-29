@@ -988,8 +988,15 @@ class Game {
             // because they did not ask to have their ships taken away.
             const fresh = defaultSpec();
             const keep = this._editSpec;
-            fresh.blue.ships = keep.blue.ships;
-            fresh.red.sag.ships = keep.red.sag.ships;
+            // Keep what the player composed; redraw only what the generator
+            // decides — the enemy's bearing, range and course. Randomise should
+            // not take somebody's ships away.
+            fresh.blue.units = keep.blue.units;
+            fresh.blue.x = keep.blue.x; fresh.blue.z = keep.blue.z;
+            fresh.blue.course = keep.blue.course;
+            fresh.red.subs = keep.red.subs;
+            fresh.red.mpa = keep.red.mpa;
+            fresh.red.bombers = keep.red.bombers;
             fresh.neutral = keep.neutral;
             fresh.posture = keep.posture;
             this._editSpec = fresh;

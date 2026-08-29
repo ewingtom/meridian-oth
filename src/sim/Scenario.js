@@ -3,7 +3,7 @@ import { World } from './World.js';
 import { weapon } from './weapons.db.js';
 import {
   HULL_NAMES, MERCHANT_NAMES, TRAWLER_NAMES,
-  BLUE_CATALOGUE, RED_CATALOGUE, posture,
+  BLUE_CATALOGUE, RED_CATALOGUE, posture, layoutBlue, layoutRed,
 } from './forces.db.js';
 
 /*
@@ -82,23 +82,27 @@ export function defaultSpec(seed = (Math.random() * 0x7fffffff) | 0) {
     posture: 'COLD',
     blue: {
       x: -20000, z: -200000, course: 8 * D2R,
-      ships: [
+      // Individual hulls, each with its own position. They START in formation
+      // — laid out by the same function the editor's "re-form" uses — but every
+      // one of them can be picked up and put somewhere else, including
+      // somewhere unwise.
+      units: layoutBlue([
         { cls: 'DDG_FLIGHT_IIA', n: 2 },
         { cls: 'FFG_CONSTELLATION', n: 2 },
         { cls: 'CVN_FORD', n: 1 },
         { cls: 'LPD', n: 1 },
         { cls: 'AOE', n: 1 },
         { cls: 'SSN_VIRGINIA', n: 1 },
-      ],
+      ], { x: -20000, z: -200000, course: 8 * D2R }),
     },
     red: {
       sag: {
         x: redX, z: redZ, course: redCourse,
-        ships: [
+        units: layoutRed([
           { cls: 'CG_SLAVA', n: 1 },
           { cls: 'DDG_UDALOY', n: 2 },
           { cls: 'FFG_STEREGUSHCHY', n: 2 },
-        ],
+        ], { x: redX, z: redZ, course: redCourse }),
       },
       subs: 1, mpa: 1, bombers: 4,
     },
@@ -262,57 +266,48 @@ function spawnBlue(world, spec, scenario) {
   const b = spec.blue;
   const course = b.course;
   const used = {};
-  const all = roster(b.ships, BLUE_CATALOGUE);
-
-  // The guide is the first escort — the flagship, at the centre of the screen.
-  const guideIdx = all.findIndex(s => s.role === 'ESCORT');
-  const order = guideIdx >= 0 ? [all[guideIdx], ...all.filter((_, i) => i !== guideIdx)] : all;
-
-  // Station assignment is not spawn order. The frigates carry the towed arrays,
-  // so they take the forward bows and listen; the destroyers cover the HVUs.
-  const stationRank = new Map();
-  const escorts = order.filter((s, i) => i > 0 && s.role === 'ESCORT');
-  escorts
-    .map((s, i) => ({ s, i, k: (BLUE_CATALOGUE.find(c => c.cls === s.cls)?.screen ?? 1) }))
-    .sort((a, b) => a.k - b.k || a.i - b.i)
-    .forEach((e, rank) => stationRank.set(e.s, rank));
-
-  const taken = { ESCORT: 0, INNER: 0, HVU: 0 };
+  const created = [], hvus = [];
   let guide = null;
-  const hvus = [], created = [];
 
-  for (const s of order) {
-    const nm = nameFor(s.cls, used);
-    let station = null, x = b.x, z = b.z;
-    if (guide) {
-      const table = STATIONS[s.role];
-      if (table) {
-        const idx = s.role === 'ESCORT' ? stationRank.get(s) : taken[s.role]++;
-        const st = table[idx % table.length];
-        station = { relBearing: st.brg * D2R, range: st.r };
-        const brg = course + station.relBearing;
-        x = b.x + Math.sin(brg) * st.r;
-        z = b.z + Math.cos(brg) * st.r;
-      } else if (s.role === 'SUB') {
-        // Detached and well ahead — a submarine in company is not a screen unit.
-        x = b.x + 6000; z = b.z + 78000;
-      }
-    }
-    const isSub = s.role === 'SUB';
+  /*
+   * Every hull is placed individually, and STATION KEEPING IS DERIVED FROM
+   * WHERE IT IS.
+   *
+   * A ship that is where the formation expects it gets a station — a bearing
+   * and range off the guide — and holds it. A ship the player has picked up and
+   * put somewhere else is marked detached and gets none, so it starts where it
+   * was put and steams on the base course until ordered otherwise. Without that
+   * distinction, dragging the carrier two hundred kilometres away would have
+   * been undone in the first few minutes by the station keeper quietly steering
+   * her back into the screen, which is not what anybody dragging a carrier two
+   * hundred kilometres away is asking for.
+   */
+  for (const h of b.units || []) {
+    const meta = BLUE_CATALOGUE.find(c => c.cls === h.cls);
+    if (!meta) continue;
+    const nm = nameFor(h.cls, used);
+    const isSub = meta.role === 'SUB';
     const u = world.spawn({
-      className: s.cls, side: SIDE.BLUE, id: nm.hullNo || `BLUE-${created.length}`,
+      className: h.cls, side: SIDE.BLUE, id: nm.hullNo || `BLUE-${created.length}`,
       name: nm.name, hullNo: nm.hullNo,
-      x, z, heading: course, speed: (isSub ? 6 : 16) * KNOT,
+      x: h.x, z: h.z, heading: course, speed: (isSub ? 6 : 16) * KNOT,
       alt: isSub ? -120 : 0,
       emcon: isSub ? EMCON.SILENT : EMCON.PASSIVE, roe: ROE.TIGHT,
     });
     if (isSub) u.depthOrdered = -120;
     if (!guide) { guide = u; u.flagship = true; }
-    else if (station) u.station = { guide, ...station };
-    if (s.role === 'HVU') hvus.push(u);
+    else if (!h.detached && !isSub) {
+      const dx = h.x - b.x, dz = h.z - b.z;
+      u.station = {
+        guide,
+        relBearing: Math.atan2(dx, dz) - course,
+        range: Math.hypot(dx, dz),
+      };
+    }
+    if (meta.role === 'HVU') hvus.push(u);
     // Anti-ship rounds ride in the destroyers' cells as well as the flagship's.
-    if (s.cls === 'DDG_FLIGHT_IIA' && created.length) { u.mags.LRASM = 16; u.magsMax.LRASM = 16; }
-    if (s.cls === 'CVN_FORD') {
+    if (h.cls === 'DDG_FLIGHT_IIA' && created.length) { u.mags.LRASM = 16; u.magsMax.LRASM = 16; }
+    if (h.cls === 'CVN_FORD') {
       // Aviation ordnance. The air wing draws from the ship's magazine, so this
       // is the real limit on how many anti-ship sorties she can fly.
       const load = { LRASM: 24, HARPOON: 16, AMRAAM: 96, SIDEWINDER: 48, MK54: 18, SONOBUOY: 400 };
@@ -320,6 +315,7 @@ function spawnBlue(world, spec, scenario) {
     }
     created.push(u);
   }
+  if (!guide) return;
 
   // Alert aircraft. A carrier does not start a watch with a cold deck, and an
   // escort keeps a Seahawk armed on the pad — which is what keeps LAUNCH HELO
@@ -379,20 +375,12 @@ function spawnBlue(world, spec, scenario) {
 function spawnRed(world, spec, scenario, rng) {
   const r = spec.red;
   const used = {};
-  const sagShips = roster(r.sag.ships, RED_CATALOGUE);
-  // A loose box, lead ship at the centre. Deterministic offsets so a given spec
-  // always produces the same formation.
-  const OFF = [
-    [0, 0], [-11000, 6000], [12500, 5000], [-4000, -12000], [6000, -13500],
-    [15000, -4000], [-15000, -6000], [3000, 14000], [-8000, 15000],
-  ];
   const sag = [];
-  sagShips.forEach((s, i) => {
-    const nm = nameFor(s.cls, used);
-    const [ox, oz] = OFF[i % OFF.length];
+  (r.sag.units || []).forEach((h, i) => {
+    const nm = nameFor(h.cls, used);
     sag.push(world.spawn({
-      className: s.cls, side: SIDE.RED, id: `RED-S${i}`, name: nm.name,
-      x: r.sag.x + ox, z: r.sag.z + oz, heading: r.sag.course, speed: 15 * KNOT,
+      className: h.cls, side: SIDE.RED, id: `RED-S${i}`, name: nm.name,
+      x: h.x, z: h.z, heading: r.sag.course, speed: 15 * KNOT,
       emcon: EMCON.PASSIVE, roe: ROE.FREE,
     }));
   });

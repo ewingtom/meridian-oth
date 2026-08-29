@@ -129,3 +129,105 @@ export function posture(id) {
 export function hullCount(list) {
   return (list || []).reduce((a, e) => a + (e.n || 0), 0);
 }
+
+/*
+ * WHERE EACH HULL STANDS.
+ *
+ * A screen is not a shape, it is a set of assignments — so the layout is a
+ * table of stations by role and the Nth ship of a role takes the Nth station.
+ * With the default order of battle this reproduces the original hand-placed
+ * formation exactly: frigates on the bows at 22 km, the second destroyer astern
+ * at 12, the high-value units on the disengaged quarter, the carrier tucked
+ * inside the screen rather than behind it because she has to turn into the wind
+ * and everybody else conforms to her.
+ *
+ * This lives here rather than in the scenario builder because the SETUP SCREEN
+ * needs it too — it is what decides where a newly added hull appears, and what
+ * "re-form" means.
+ */
+export const STATIONS = {
+  ESCORT: [
+    { brg: -35, r: 22000 }, { brg: 35, r: 22000 }, { brg: 180, r: 12000 },
+    { brg: -105, r: 20000 }, { brg: 105, r: 20000 }, { brg: 0, r: 26000 },
+    { brg: -150, r: 17000 }, { brg: 150, r: 17000 },
+  ],
+  INNER: [{ brg: 175, r: 9000 }, { brg: 195, r: 11000 }],
+  HVU: [
+    { brg: 160, r: 15000 }, { brg: -160, r: 16000 },
+    { brg: 148, r: 19000 }, { brg: -148, r: 20000 },
+  ],
+  SUB: [{ brg: 8, r: 78000 }, { brg: -14, r: 86000 }],
+};
+
+/** A loose box for the surface action group, lead ship at the centre. */
+export const RED_OFFSETS = [
+  [0, 0], [-11000, 6000], [12500, 5000], [-4000, -12000], [6000, -13500],
+  [15000, -4000], [-15000, -6000], [3000, 14000], [-8000, 15000],
+];
+
+const D2R_ = Math.PI / 180;
+
+/**
+ * Lay a blue composition out into individual hulls with absolute positions.
+ *
+ * `counts` is [{cls, n}]. Returns one entry per hull. The first escort is the
+ * guide and sits at the anchor; everybody else takes a station by role, and
+ * station assignment is by what a hull is GOOD at rather than by spawn order —
+ * the frigates carry the towed arrays so they lead and listen, the destroyers
+ * sit where they can cover the high-value units.
+ */
+export function layoutBlue(counts, anchor) {
+  const flat = [];
+  for (const e of counts || []) {
+    const meta = BLUE_CATALOGUE.find(c => c.cls === e.cls);
+    if (!meta) continue;
+    for (let i = 0; i < (e.n || 0); i++) flat.push({ cls: e.cls, role: meta.role, screen: meta.screen ?? 1 });
+  }
+  const gi = flat.findIndex(f => f.role === 'ESCORT');
+  const guide = gi >= 0 ? flat[gi] : flat[0];
+  const rest = flat.filter(f => f !== guide);
+
+  // Escorts get their stations in `screen` order, not arrival order.
+  const escortOrder = rest
+    .map((f, i) => ({ f, i }))
+    .filter(o => o.f.role === 'ESCORT')
+    .sort((a, b) => a.f.screen - b.f.screen || a.i - b.i)
+    .map(o => o.f);
+
+  const taken = {};
+  const out = [];
+  if (guide) out.push({ cls: guide.cls, x: anchor.x, z: anchor.z, detached: false, guide: true });
+  for (const f of rest) {
+    const table = STATIONS[f.role] || STATIONS.ESCORT;
+    const idx = f.role === 'ESCORT' ? escortOrder.indexOf(f) : (taken[f.role] = (taken[f.role] || 0) + 1) - 1;
+    const st = table[idx % table.length];
+    const brg = anchor.course + st.brg * D2R_;
+    out.push({
+      cls: f.cls,
+      x: anchor.x + Math.sin(brg) * st.r,
+      z: anchor.z + Math.cos(brg) * st.r,
+      detached: false, guide: false,
+    });
+  }
+  return out;
+}
+
+/** The same, for the surface action group. */
+export function layoutRed(counts, anchor) {
+  const flat = [];
+  for (const e of counts || []) {
+    if (!RED_CATALOGUE.find(c => c.cls === e.cls)) continue;
+    for (let i = 0; i < (e.n || 0); i++) flat.push(e.cls);
+  }
+  return flat.map((cls, i) => {
+    const [ox, oz] = RED_OFFSETS[i % RED_OFFSETS.length];
+    return { cls, x: anchor.x + ox, z: anchor.z + oz, detached: false, guide: i === 0 };
+  });
+}
+
+/** Counts by class, which is what the editor's steppers show. */
+export function countsOf(units) {
+  const m = new Map();
+  for (const u of units || []) m.set(u.cls, (m.get(u.cls) || 0) + 1);
+  return m;
+}
