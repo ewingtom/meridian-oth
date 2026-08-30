@@ -8,6 +8,7 @@ import { TacticalOverlay } from './ui/TacticalOverlay.js';
 import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { buildScenario, defaultSpec, Mission } from './sim/Scenario.js';
+import { SCENARIOS } from './sim/scenarios.db.js';
 import { SetupScreen } from './ui/SetupScreen.js';
 import { weapon } from './sim/weapons.db.js';
 import { loadout } from './sim/airwing.db.js';
@@ -61,10 +62,15 @@ class Game {
      * every launch is new.
      */
     const handoff = readSetupHandoff();
-    const seedParam = new URLSearchParams(location.search).get('seed');
+    const q = new URLSearchParams(location.search);
+    const seedParam = q.get('seed');
+    // ?mission=ALPHA picks one directly; otherwise the menu chooses.
+    this.missionId = handoff ? (handoff.spec.scenario || 'NORTH_ANCHOR')
+      : (q.get('mission') || 'NORTH_ANCHOR');
     this.world = buildScenario(
       handoff ? handoff.spec
         : (seedParam ? (parseInt(seedParam, 10) | 0) : undefined),
+      this.missionId,
     );
     this._handoff = handoff;
     this.mission = new Mission(this.world);
@@ -966,6 +972,62 @@ class Game {
     requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove('hidden')));
   }
 
+  /**
+   * The mission picker on the menu.
+   *
+   * Choosing a different mission REBUILDS the world, because a scenario decides
+   * the forces, the clock, the objectives and the sea state — there is no
+   * meaningful sense in which you can switch mission without starting again.
+   * The rebuild happens here rather than through a reload because nothing has
+   * started yet: the view is showing an attract shot and no state is worth
+   * preserving.
+   */
+  _buildMissionPicker() {
+    const host = $('mission-pick');
+    if (!host) return;
+    host.innerHTML = '';
+    for (const d of SCENARIOS) {
+      const b = document.createElement('button');
+      b.className = `mcard${d.id === this.missionId ? ' on' : ''}`;
+      b.innerHTML = `<div class="mt">${d.name.replace(/^OPERATION /, '')}</div>`
+        + `<div class="mg">${d.tag}</div><div class="mb">${d.blurb}</div>`;
+      b.onclick = () => { this.selectMission(d.id); };
+      host.appendChild(b);
+    }
+  }
+
+  /**
+   * Choosing a mission records the choice; it does not rebuild anything yet.
+   *
+   * A scenario decides the forces, the clock, the objectives and the outcome
+   * tests, so switching mission means building a different world — and the view,
+   * the HUD and the overlay are all wired to the world they were constructed
+   * with. Swapping it underneath them leaves every unit view pointing at a ship
+   * that no longer exists. Nothing has started at this point, so the cheap and
+   * safe move is to remember the choice and build it when the player commits,
+   * through the same reload boundary the setup screen already uses.
+   */
+  selectMission(id) {
+    this.missionId = id;
+    this._editSpec = null;
+    this.setup = null;
+    this._buildMissionPicker();
+    this.audio.ui('click');
+  }
+
+  /** True when the built world is not the mission the player has chosen. */
+  get _missionStale() {
+    return this.world.scenario.id !== this.missionId;
+  }
+
+  /** Commit to a mission by handing it through a reload, as the editor does. */
+  _launchMission(spec) {
+    try {
+      sessionStorage.setItem('oth.setup', JSON.stringify({ spec, autostart: true }));
+    } catch (e) { /* private mode: fall through and sail what is already built */ }
+    location.reload();
+  }
+
   _wireScreens() {
     /*
      * The setup screen builds a force spec and hands it back through a reload.
@@ -974,7 +1036,7 @@ class Game {
     $('btn-setup').onclick = () => {
       this.audio.unlock();
       if (!this.setup) {
-        this.setup = new SetupScreen(this._editSpec || (this._editSpec = defaultSpec()), {
+        this.setup = new SetupScreen(this._editSpec || (this._editSpec = defaultSpec(undefined, this.missionId)), {
           onBegin: (spec) => {
             try {
               sessionStorage.setItem('oth.setup', JSON.stringify({ spec, autostart: true }));
@@ -986,7 +1048,7 @@ class Game {
             // A fresh draw of everything the generator decides — enemy bearing,
             // range and course — with the player's composition left alone,
             // because they did not ask to have their ships taken away.
-            const fresh = defaultSpec();
+            const fresh = defaultSpec(undefined, this.missionId);
             const keep = this._editSpec;
             // Keep what the player composed; redraw only what the generator
             // decides — the enemy's bearing, range and course. Randomise should
@@ -1014,6 +1076,7 @@ class Game {
 
     $('btn-start').onclick = () => {
       this.audio.unlock();
+      if (this._missionStale) { this._launchMission(defaultSpec(undefined, this.missionId)); return; }
       this._hideScreen('screen-menu');
       this._fillBrief();
       this._wireScroll('brief-body');
@@ -1022,6 +1085,7 @@ class Game {
     $('btn-howto').onclick = () => { this._fillHelp(); this._wireScroll('help-body'); this._showScreen('screen-help'); };
     $('btn-help-close').onclick = () => this._hideScreen('screen-help');
     this._attractShot();
+    this._buildMissionPicker();
     $('btn-brief-go').onclick = () => {
       this._hideScreen('screen-brief');
       $('hud').style.display = '';

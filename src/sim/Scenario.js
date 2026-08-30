@@ -5,6 +5,7 @@ import {
   HULL_NAMES, MERCHANT_NAMES, TRAWLER_NAMES,
   BLUE_CATALOGUE, RED_CATALOGUE, posture, layoutBlue, layoutRed,
 } from './forces.db.js';
+import { SCENARIOS, scenarioById, missionContext, KESTREL } from './scenarios.db.js';
 
 /*
  * OPERATION NORTH ANCHOR — the Kestrel Sea, 0515 local.
@@ -51,63 +52,21 @@ const RED_SHIP_NAMES = ['VOLNA', 'GROMKIY', 'BESSTRASHNY', 'SMETLIVY', 'ZORKIY']
  * opens pre-filled so the player is editing a real task force rather than
  * assembling one from nothing.
  */
-export function defaultSpec(seed = (Math.random() * 0x7fffffff) | 0) {
+/**
+ * The order of battle a scenario sails with — what Engage Now uses, and what
+ * the editor opens pre-filled.
+ *
+ * Each scenario owns its own generator, because "where does the enemy start"
+ * is the question that makes one mission different from another. The seed
+ * feeds a private stream so the same seed replays the same sortie.
+ */
+export function defaultSpec(seed = (Math.random() * 0x7fffffff) | 0, scenarioId = 'NORTH_ANCHOR') {
   const rng = new Rng(seed);
-
-  /*
-   * Where the enemy actually is, hidden from the player.
-   *
-   * This used to be a rectangle spanning x -150..130 km at z 165..265 km — which
-   * is always NORTH, so however the seed fell the answer to "which way do I send
-   * the Poseidon" was the same. Placing the group in POLAR coordinates about the
-   * objective instead puts it anywhere on a 150-degree arc, so the bearing is a
-   * real unknown and the search has to start from the intelligence rather than
-   * from memory.
-   *
-   * The arc is centred north because that is where their airfield is — a surface
-   * action group that appeared to the southwest would have had to steam past the
-   * whole task force to get there. Within that constraint it is wide open.
-   */
-  const OBJ = { x: 30000, z: 20000 };
-  const approachBrg = (-75 + rng.range(0, 150)) * D2R;      // 285 through 000 to 075
-  const approachRng = rng.range(185000, 295000);
-  const redX = OBJ.x + Math.sin(approachBrg) * approachRng;
-  const redZ = OBJ.z + Math.cos(approachBrg) * approachRng;
-  // Closing the objective, with a few degrees of wander so the course is not a
-  // giveaway either.
-  const redCourse = Math.atan2(OBJ.x - redX, OBJ.z - redZ) + rng.range(-0.22, 0.22);
-
-  return {
-    seed,
-    posture: 'COLD',
-    blue: {
-      x: -20000, z: -200000, course: 8 * D2R,
-      // Individual hulls, each with its own position. They START in formation
-      // — laid out by the same function the editor's "re-form" uses — but every
-      // one of them can be picked up and put somewhere else, including
-      // somewhere unwise.
-      units: layoutBlue([
-        { cls: 'DDG_FLIGHT_IIA', n: 2 },
-        { cls: 'FFG_CONSTELLATION', n: 2 },
-        { cls: 'CVN_FORD', n: 1 },
-        { cls: 'LPD', n: 1 },
-        { cls: 'AOE', n: 1 },
-        { cls: 'SSN_VIRGINIA', n: 1 },
-      ], { x: -20000, z: -200000, course: 8 * D2R }),
-    },
-    red: {
-      sag: {
-        x: redX, z: redZ, course: redCourse,
-        units: layoutRed([
-          { cls: 'CG_SLAVA', n: 1 },
-          { cls: 'DDG_UDALOY', n: 2 },
-          { cls: 'FFG_STEREGUSHCHY', n: 2 },
-        ], { x: redX, z: redZ, course: redCourse }),
-      },
-      subs: 1, mpa: 1, bombers: 4,
-    },
-    neutral: { merchants: 9, trawlers: 3 },
-  };
+  const def = scenarioById(scenarioId);
+  const spec = def.spec(seed, rng);
+  spec.seed = seed;
+  spec.scenario = def.id;
+  return spec;
 }
 
 /**
@@ -118,49 +77,40 @@ export function defaultSpec(seed = (Math.random() * 0x7fffffff) | 0) {
  * either the generator or the player can produce, and this function does not
  * care which one handed it over.
  */
-export function buildScenario(specOrSeed) {
+export function buildScenario(specOrSeed, scenarioId) {
   const spec = (specOrSeed && typeof specOrSeed === 'object')
     ? specOrSeed
-    : defaultSpec(specOrSeed === undefined ? undefined : specOrSeed);
+    : defaultSpec(specOrSeed === undefined ? undefined : specOrSeed, scenarioId);
   const seed = spec.seed ?? 1;
   const rng = new Rng(seed);
-  const OBJ = { x: 30000, z: 20000 };
+  const def = scenarioById(spec.scenario || scenarioId);
+  const OBJ = def.objectivePoint;
   const redX = spec.red.sag.x, redZ = spec.red.sag.z, redCourse = spec.red.sag.course;
 
+  // The world's own record of the mission it is. Everything scenario-specific
+  // comes from the definition; everything about the sea is shared, because it
+  // is the same sea.
   const scenario = {
     seed,
-    id: 'NORTH_ANCHOR',
-    name: 'OPERATION NORTH ANCHOR',
-    // Chart datum for the origin. The graticule used to print nautical miles
-    // from the origin with hemisphere letters on them, which reads as a latitude
-    // and produced references like 150S — a latitude that cannot exist. With a
-    // datum the same grid prints real positions you could pass over the net.
-    datum: { lat: 62.0, lon: 8.0 },
-    subtitle: 'Kestrel Sea · 0515 local · Task Force 44',
+    id: def.id,
+    name: def.name,
+    subtitle: `${def.subtitle} · ${def.name.replace(/^OPERATION /, '')}`,
+    briefing: def.briefing,
+    startTime: def.startTime,
+    timeLimit: def.timeLimit,
+    objectivePoint: def.objectivePoint,
+    posture: spec.posture,
     seaState: 3,
     windDir: 210 * D2R,
-    // Sunrise is at 05:00 (see the solar curve in SceneView). Opening at 04:10
-    // meant the first fifty minutes of every game — and the menu behind it, and
-    // every screenshot anyone ever took of this — happened in nautical twilight
-    // with the sun nine degrees below the horizon. It was not subtle: the frame
-    // averaged 31 of 255 and the ships were black. Fifteen minutes after
-    // sunrise the sun is about three degrees up: a warm path across the water,
-    // hulls lit gold rather than silhouetted, and the light hardening steadily
-    // through the search into the engagement. Same dawn patrol, on the right
-    // side of the horizon.
-    startTime: 5 * 3600 + 15 * 60,
-    timeLimit: 7.5 * 3600,
+    datum: KESTREL.datum,
+    islands: KESTREL.islands,
+    redAirbase: KESTREL.redAirbase,
+    blueAirbase: KESTREL.blueAirbase,
     redTruth: { x: redX, z: redZ, course: redCourse },
-    // What INTELLIGENCE thinks, which is not the same thing.
-    // Where the Volsk commander thinks the task force might be. Deliberately a
-    // vast box that does NOT start centred on the truth: he has the same problem
-    // the player does, and the time it takes him to solve it is the time the
-    // player has to solve theirs first.
-    // Where the Volsk commander looks. He does NOT know where the task force is
-    // either, and his box covers the northern half of the operating area — the
-    // approaches to his own position and to POINT OSCAR. The consequence is that
-    // contact happens when the PLAYER decides to push north, not on a timer,
-    // which is what makes the transit a decision instead of a countdown.
+    // What INTELLIGENCE thinks, which is not the same thing. Deliberately a
+    // vast box that does not start centred on the truth: the enemy commander
+    // has the same problem the player does, and the time it takes him to solve
+    // it is the time the player has to solve theirs first.
     redSearchBox: { x: rng.range(-90000, 90000), z: 70000, w: 600000, h: 280000, axis: 0 },
     intelBox: {
       x: redX + rng.range(-70000, 70000),
@@ -169,40 +119,16 @@ export function buildScenario(specOrSeed) {
       confidence: 'MODERATE',
       age: 5.5 * 3600,
     },
-    // Where the SAG waits. A surface action group with no contact does not
-    // charge blindly at the enemy's assumed position — it holds a barrier across
-    // the approaches it is there to deny, which is also what makes the player's
-    // search a solvable problem instead of a chase after a target that has
-    // already left the box intelligence gave them.
+    // Where the SAG waits. A surface action group with no contact holds a
+    // barrier across the approaches it is there to deny rather than charging at
+    // an assumed position — which is also what makes the player's search a
+    // solvable problem instead of a chase after a target that has left the box.
     redAdvanceTo: { x: redX * 0.6, z: redZ - 40000 },
     redPatrol: {
       ax: redX - 140000, az: redZ - 25000,
       bx: redX + 140000, bz: redZ + 25000,
     },
-    redAirbase: { x: 210000, z: 415000, name: 'VOLSK NAVAL AIR STATION' },
-    blueAirbase: { x: -330000, z: -430000, name: 'NAS KESTREL POINT', alive: true },
     redSubBarrier: { ax: -120000, az: 60000, bx: 120000, bz: 20000 },
-    // Reachable, and only just. GRANITE BAY makes 22 knots; POINT OSCAR is 120
-    // nautical miles up-threat, which is five and a half hours at her best speed
-    // against a seven and a half hour window. That leaves enough slack to turn
-    // away from one raid and not enough to wander — which is the whole point of
-    // escorting a high value unit.
-    objectivePoint: { x: 30000, z: 20000, name: 'POINT OSCAR', radius: 30000 },
-    // The landing has to happen somewhere. KESTREL ISLAND and its outliers give
-    // POINT OSCAR a coast, the plot some terrain, and the task force somewhere
-    // it can put a headland between itself and a hostile radar.
-    islands: [
-      { id: 'KESTREL', name: 'KESTREL I.', x: 34000, z: 6000, radius: 5200, height: 620, seed: 17 },
-      { id: 'SKUA', name: 'SKUA ROCK', x: 12000, z: 26000, radius: 1500, height: 120, seed: 44 },
-      { id: 'BRANT', name: 'BRANT I.', x: 58000, z: 30000, radius: 3100, height: 430, seed: 91 },
-      { id: 'GANNET', name: 'GANNET SKERRIES', x: -8000, z: 44000, radius: 900, height: 46, seed: 63 },
-    ],
-    briefing: [
-      'Two hours ago a Volsk surface action group sortied from the northern basin and went dark. Fleet intelligence puts them somewhere in the shaded box — a hundred and sixty thousand square miles of empty grey water, five and a half hours stale.',
-      'Task Force 44 is escorting GRANITE BAY and CAPE HATTERAS north to POINT OSCAR. The landing force embarked in GRANITE BAY has to be there. That is the mission; everything else is in support of it.',
-      'The SAG is built around a Volna-class cruiser with sixteen supersonic anti-ship missiles that outrange everything you own by two hundred miles. If he finds you first, you will not get to choose the terms of the engagement.',
-      'Find him. Get a weapons-quality track. Hold it long enough for your missiles to arrive. And keep your emissions off the air until the moment shooting is better than hiding.',
-    ],
   };
 
   const world = new World(scenario);
@@ -391,8 +317,14 @@ function spawnRed(world, spec, scenario, rng) {
     const sub = world.spawn({
       className: 'SSGN_AKULA', side: SIDE.RED, id: `RED-SS${i}`,
       name: nameFor('SSGN_AKULA', used).name,
-      x: scenario.objectivePoint.x + Math.sin(rng.range(-2.4, 2.4)) * rng.range(40000, 130000),
-      z: scenario.objectivePoint.z + Math.cos(rng.range(-2.4, 2.4)) * rng.range(30000, 110000),
+      // A scenario may say where the boat is hunting; otherwise it takes its own
+      // bearing about the objective, independent of the surface group — a
+      // submarine that always sat in the same box was the one contact nobody
+      // had to search for.
+      x: (r.subAnchor ? r.subAnchor.x : scenario.objectivePoint.x)
+        + Math.sin(rng.range(-2.4, 2.4)) * rng.range(r.subAnchor ? 12000 : 40000, r.subAnchor ? 45000 : 130000),
+      z: (r.subAnchor ? r.subAnchor.z : scenario.objectivePoint.z)
+        + Math.cos(rng.range(-2.4, 2.4)) * rng.range(r.subAnchor ? 10000 : 30000, r.subAnchor ? 40000 : 110000),
       heading: Math.PI, speed: 5 * KNOT, alt: -150, emcon: EMCON.SILENT, roe: ROE.FREE,
     });
     sub.depthOrdered = -150;
@@ -567,22 +499,44 @@ function applyPosture(world, spec, scenario) {
 export class Mission {
   constructor(world) {
     this.world = world;
+    this.def = scenarioById(world.scenario.id);
     this.phase = 'SEARCH';
     this.status = 'ACTIVE';
     this.startedAt = world.time;
-    this.objectives = [
-      { id: 'FIND', text: 'Locate the Volsk surface action group', detail: 'Gain a track of any quality on a hostile surface combatant', done: false, key: true },
-      { id: 'TQ', text: 'Develop a weapons-quality track (TQ4+)', detail: 'A firing solution needs an error ellipse smaller than a missile seeker basket', done: false, key: true },
-      { id: 'CG', text: 'Neutralise the Volna-class cruiser', detail: 'She carries sixteen P-1000 with a 300 nm reach — she is the threat', done: false, key: true },
-      { id: 'ESCORTS', text: 'Destroy at least three hostile escorts', done: false, key: false },
-      { id: 'OSCAR', text: 'Escort GRANITE BAY to POINT OSCAR', detail: 'The landing force has to arrive. That is the mission.', done: false, key: true },
-      { id: 'HVU', text: 'Both high value units survive', done: false, key: false, negative: true },
-    ];
+    // Objectives come from the scenario and carry their own tests. They used to
+    // be six literals indexed by number in step(), which is why there was only
+    // ever one mission.
+    this.objectives = this.def.objectives.map(o => ({ ...o, done: false }));
     this.failReason = null;
     this.hints = [];
     this._hintsShown = new Set();
     this.grade = null;
     this.oscarProgress = 0;
+    this._reached = new Set();
+  }
+
+  /** Has the objective with this id been met? Used by phase and outcome tests. */
+  done(id) {
+    const o = this.objectives.find(x => x.id === id);
+    return !!o && o.done;
+  }
+
+  /**
+   * Has any live blue unit of this class reached the objective point?
+   * Also drives the progress readout, so a long transit shows movement rather
+   * than a boolean that flips at the end.
+   */
+  reached(clsFragment) {
+    if (this._reached.has(clsFragment)) return true;
+    const w = this.world, pt = w.scenario.objectivePoint;
+    if (!pt) return false;
+    for (const u of w.units) {
+      if (!u.alive || u.side !== SIDE.BLUE || !u.className.includes(clsFragment)) continue;
+      const d = Math.hypot(u.x - pt.x, u.z - pt.z);
+      this.oscarProgress = Math.max(this.oscarProgress, 1 - Math.min(1, d / 430000));
+      if (d < pt.radius) { this._reached.add(clsFragment); return true; }
+    }
+    return false;
   }
 
   hint(id, text, opts = {}) {
@@ -596,75 +550,25 @@ export class Mission {
 
   step() {
     const w = this.world;
-    const table = w.picture('BLUE');
     const now = w.time;
+    const c = missionContext(w, this);
 
-    const redSurface = w.units.filter(u => u.side === 'RED' && u.domain === 'SURFACE');
-    const redAlive = redSurface.filter(u => u.alive);
-    const cg = w.units.find(u => u.id === 'RED-CG');
-    const hvus = w.units.filter(u => u.side === 'BLUE' && u.hvu);
-    const granite = w.units.find(u => u.id === 'LPD-31');
-
-    const sagTracks = table.list.filter(t =>
-      !t.faded && t.identity === 'HOSTILE' && t.domain === 'SURFACE' &&
-      redSurface.some(r => r.id === t.truthId));
-    const bestTq = sagTracks.reduce((m, t) => Math.max(m, t.tq), 0);
-
-    this.objectives[0].done ||= sagTracks.length > 0;
-    if (bestTq >= WEAPONS_QUALITY_TQ && !this.objectives[1].done) {
-      this.objectives[1].done = true;
-      if (w.stats.timeToFirstWeaponsQuality === null) w.stats.timeToFirstWeaponsQuality = now - this.startedAt;
-    }
-    this.objectives[2].done = !!cg && !cg.alive;
-    this.objectives[3].done = redSurface.filter(u => !u.alive && u !== cg).length >= 3;
-    this.objectives[5].done = hvus.every(u => u.alive);
-
-    if (granite && granite.alive) {
-      const d = Math.hypot(granite.x - w.scenario.objectivePoint.x, granite.z - w.scenario.objectivePoint.z);
-      this.oscarProgress = Math.max(this.oscarProgress, 1 - Math.min(1, d / 430000));
-      if (d < w.scenario.objectivePoint.radius) this.objectives[4].done = true;
+    // Objectives latch, except the ones phrased as a standing condition — "both
+    // high value units survive" has to be able to become false again.
+    for (const o of this.objectives) {
+      const v = !!o.check(w, this, c);
+      o.done = o.negative ? v : (o.done || v);
     }
 
-    // Phase readout
-    if (!this.objectives[0].done) this.phase = 'SEARCH';
-    else if (!this.objectives[1].done) this.phase = 'DEVELOP';
-    else if (!this.objectives[2].done) this.phase = 'STRIKE';
-    else if (!this.objectives[4].done) this.phase = 'TRANSIT';
-    else this.phase = 'COMPLETE';
+    this.phase = this.def.phase(w, this, c) || this.phase;
 
-    const inbound = w.weapons.filter(o => o.alive && o.side === 'RED' && o.category === 'ASM').length;
-    if (inbound > 0) this.phase = 'DEFEND';
+    if (this.def.hints) this._hints(now, c.table, c.bestTq, c.sagTracks, c.inbound);
 
-    this._hints(now, table, bestTq, sagTracks, inbound);
-
-    // ── win / loss ──────────────────────────────────────────────────────────
     if (this.status !== 'ACTIVE') return;
-    // Only the landing force is mission-critical. Losing the oiler is a serious
-    // blow and a heavy scoring penalty, but a task force that has lost its
-    // replenishment ship can still put the Marines ashore — ending the whole
-    // operation on it made a single unlucky leaker into an instant loss.
-    if (granite && !granite.alive) {
-      this._end('FAILURE', 'GRANITE BAY is lost with the landing force embarked. The operation is over.');
-      return;
-    }
-    if (this.objectives[4].done && this.objectives[2].done) {
-      this._end('SUCCESS', 'GRANITE BAY is at POINT OSCAR and the hostile surface action group has been broken.');
-      return;
-    }
-    if (this.objectives[4].done && redAlive.length === 0) {
-      this._end('SUCCESS', 'Objective secured. The Kestrel Sea belongs to Task Force 44.');
-      return;
-    }
-    if (now - this.startedAt > w.scenario.timeLimit) {
-      this._end('FAILURE', 'The landing window has closed. GRANITE BAY did not reach POINT OSCAR in time.');
-    }
+    const out = this.def.outcome(w, this, c);
+    if (out) this._end(out.status, out.reason);
   }
 
-  /**
-   * Contextual guidance. Deliberately delivered as watch-officer radio traffic in
-   * the comms log rather than as modal tutorial boxes — the player is being
-   * advised by their staff, which is both less annoying and closer to the truth.
-   */
   _hints(now, table, bestTq, sagTracks, inbound) {
     const w = this.world;
     const elapsed = now - this.startedAt;
@@ -789,6 +693,7 @@ export class Mission {
   }
 
   _end(status, reason) {
+    // Status first: score() reads it to cap the rank on a failure.
     this.status = status;
     this.failReason = reason;
     this.endedAt = this.world.time;
@@ -806,8 +711,9 @@ export class Mission {
     const redKills = s.redLosses.filter(l => !l.id.includes('BMR')).length;
     add('Hostile combatants destroyed', redKills * 120,
       `${redKills} hostile ${redKills === 1 ? 'unit' : 'units'} destroyed`);
-    add('High value units intact', w.units.filter(u => u.hvu && u.alive).length * 250,
-      `${w.units.filter(u => u.hvu && u.alive).length} of 2 HVUs afloat`);
+    const hvuAll = w.units.filter(u => u.hvu).length;
+    const hvuUp = w.units.filter(u => u.hvu && u.alive).length;
+    if (hvuAll) add('High value units intact', hvuUp * 250, `${hvuUp} of ${hvuAll} HVUs afloat`);
     add('Own losses', -s.blueLosses.length * 200,
       `${s.blueLosses.length} friendly ${s.blueLosses.length === 1 ? 'unit' : 'units'} lost`);
     const ourNeutrals = s.neutralLosses.filter(l => l.by === 'BLUE');
@@ -824,7 +730,24 @@ export class Mission {
       add('Time to weapons-quality track', Math.round(Math.max(0, 260 - mins * 3)),
         `${Math.round(mins)} minutes from mission start`);
     }
-    if (this.objectives[4].done) add('POINT OSCAR reached', 300, 'Landing force delivered');
+    /*
+     * Objectives, scored from the scenario's own list.
+     *
+     * This used to be `this.objectives[4].done` — the fifth objective, by
+     * index, which happened to be POINT OSCAR in the one mission that existed.
+     * Every scenario with fewer than five objectives threw on the debrief
+     * screen, which is a spectacular way to lose a player's session at the
+     * exact moment they wanted to see how they did.
+     */
+    const key = this.objectives.filter(o => o.key);
+    const keyDone = key.filter(o => o.done);
+    if (key.length) {
+      add('Mission objectives', keyDone.length * Math.round(900 / key.length),
+        `${keyDone.length} of ${key.length} key objectives met`);
+    }
+    const bonus = this.objectives.filter(o => !o.key && o.done);
+    if (bonus.length) add('Secondary objectives', bonus.length * 90,
+      bonus.map(o => o.text).join('; '));
 
     // Command judgement: the signals you answered well, and the ones you let run
     // out. A task force commander is graded on more than missiles.
@@ -838,9 +761,23 @@ export class Mission {
     // force home intact is +500 before anything else happens, so thresholds that
     // started at 500 graded a clean run — two HVUs afloat, no losses, no neutrals
     // killed — as UNSATISFACTORY. UNSATISFACTORY should mean you lost something.
-    const rank = total > 1400 ? 'DISTINGUISHED'
+    /*
+     * A failed mission cannot be graded DISTINGUISHED.
+     *
+     * The rank was a pure function of points, and points come mostly from
+     * things that are true whether or not you succeeded — hulls afloat, no
+     * neutrals killed, objectives partially met. A barrier patrol that let the
+     * submarine through and lost nothing scored 1650 and was told it had done
+     * distinguished work. Failing the mission is the mission's verdict on you,
+     * and the rank has to say so.
+     */
+    let rank = total > 1400 ? 'DISTINGUISHED'
       : total > 850 ? 'EFFECTIVE'
         : total > 300 ? 'MARGINAL' : 'UNSATISFACTORY';
-    return { total, pts, rank };
+    if (this.status === 'FAILURE') {
+      const ORDER = ['UNSATISFACTORY', 'MARGINAL', 'EFFECTIVE', 'DISTINGUISHED'];
+      rank = ORDER[Math.min(ORDER.indexOf(rank), ORDER.indexOf('MARGINAL'))];
+    }
+    return { total, pts, rank, status: this.status };
   }
 }

@@ -981,3 +981,31 @@ body.cheap-ui #topbar {
   .setup-cols { grid-template-columns: 250px 1fr 250px; }
   #setup-posture { max-width: 54%; }
 }
+
+/* ── mission picker ───────────────────────────────────────────────────────
+   On the menu, above the buttons. Five missions that each ask a different
+   question — so the card leads with the question, not with the ship list. */
+#mission-pick {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px; margin: 26px 0 22px; width: min(1020px, 92vw);
+}
+.mcard {
+  text-align: left; padding: 11px 13px; cursor: pointer;
+  border: 1px solid var(--line); background: rgba(8, 16, 24, 0.55);
+  transition: border-color .14s ease, background .14s ease;
+}
+.mcard:hover { border-color: var(--line-hi); background: rgba(14, 26, 38, 0.7); }
+.mcard.on { border-color: var(--accent); background: var(--accent-dim); }
+.mcard .mt {
+  font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+  color: var(--txt-hi); text-transform: uppercase;
+}
+.mcard.on .mt { color: var(--accent); }
+.mcard .mg {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+  color: var(--accent); text-transform: uppercase; margin-top: 3px;
+}
+.mcard .mb {
+  font-family: var(--mono); font-size: 10px; line-height: 1.55;
+  color: var(--dim); margin-top: 7px;
+}
