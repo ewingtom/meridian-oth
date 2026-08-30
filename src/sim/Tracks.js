@@ -67,7 +67,22 @@ export class Track {
     this.x = truth.x; this.z = truth.z;
     this.vx = 0; this.vz = 0;
     this.alt = truth.alt;
+    /*
+     * A brand-new track has a position but no belief about it. This used to be
+     * matI(1) — a covariance asserting the position was known to within a metre
+     * before any sensor had reported. Two things fell out of that. _refresh()
+     * recomputes sigma from P, so every track flashed TQ6 on creation and
+     * latched everWeaponsQuality, making that flag true for every contact ever
+     * held including ones with no contributors at all. And a filter that
+     * confident in its prior barely moves for the first real measurement, so
+     * tracks converged slowly for no reason. Start where the truth is: we do
+     * not know where he is.
+     */
     this.P = matI(1);
+    this.P[0] = this.P[5] = 1e12;      // position variance — a 1000 km 1-sigma
+    this.P[10] = this.P[15] = 2500;    // velocity variance — 50 m/s, i.e. anything
+    /** Set once a sensor has actually contributed. No quality claim before that. */
+    this.measured = false;
 
     this.tq = 0;
     this.sigma = 1e6;
@@ -96,6 +111,7 @@ export class Track {
 
   /** Seed a brand-new track from a positional measurement. */
   seedPosition(mx, mz, sigma, vx = 0, vz = 0, velSigma = 12) {
+    this.measured = true;
     this.x = mx; this.z = mz; this.vx = vx; this.vz = vz;
     const P = new Float64Array(16);
     P[0] = sigma * sigma; P[5] = sigma * sigma;
@@ -112,6 +128,7 @@ export class Track {
    * and still the backbone of passive targeting.
    */
   seedBearing(sx, sz, bearing, assumedRange, bearingSigma) {
+    this.measured = true;
     const mx = sx + Math.sin(bearing) * assumedRange;
     const mz = sz + Math.cos(bearing) * assumedRange;
     this.x = mx; this.z = mz; this.vx = 0; this.vz = 0;
@@ -166,6 +183,7 @@ export class Track {
 
   /** Measurement update with a 2-D position fix (radar, active sonar, EO). */
   updatePosition(mx, mz, sigma) {
+    this.measured = true;
     const P = this.P;
     const r = sigma * sigma;
     // S = H P Hᵀ + R  (H picks off x,z)
@@ -202,6 +220,7 @@ export class Track {
    * two of these from widely separated receivers and the intersection is a fix.
    */
   updateBearing(sx, sz, bearing, bearingSigma) {
+    this.measured = true;
     const dx = this.x - sx, dz = this.z - sz;
     const d2 = dx * dx + dz * dz;
     if (d2 < 1) return;
@@ -232,6 +251,7 @@ export class Track {
 
   /** Range-only update (rare — a ranging sonar cut or a laser). */
   updateRange(sx, sz, range, rangeSigma) {
+    this.measured = true;
     const dx = this.x - sx, dz = this.z - sz;
     const d = Math.hypot(dx, dz);
     if (d < 1) return;
@@ -257,8 +277,8 @@ export class Track {
     if (!(P[0] > 0)) P[0] = 1e4;
     if (!(P[5] > 0)) P[5] = 1e4;
     this.sigma = Math.sqrt(Math.max(1, (P[0] + P[5]) * 0.5));
-    this.tq = tqFromSigma(this.sigma);
-    if (this.tq >= WEAPONS_QUALITY_TQ) this.everWeaponsQuality = true;
+    this.tq = this.measured ? tqFromSigma(this.sigma) : 0;
+    if (this.measured && this.tq >= WEAPONS_QUALITY_TQ) this.everWeaponsQuality = true;
     this.speedEst = Math.hypot(this.vx, this.vz);
     this.courseEst = Math.atan2(this.vx, this.vz);
     // 1-sigma error ellipse for the plot

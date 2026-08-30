@@ -57,6 +57,14 @@ export class World {
       redAsmFired: 0, redAsmLeakers: 0,
       timeToFirstWeaponsQuality: null,
       emconViolations: 0,
+      /*
+       * The watch, as it will be remembered. A short ledger of the handful of
+       * things that actually turned the engagement — first contact, the shot,
+       * the hit, the loss — so the debrief can show a player what happened
+       * rather than only what it added up to. Ranked, and capped, because a
+       * two-hour action produces thousands of events and about eight moments.
+       */
+      moments: [],
     };
     this.listeners = [];
     this.paused = false;
@@ -67,6 +75,22 @@ export class World {
 
   on(fn) { this.listeners.push(fn); }
   emit(ev) { for (const f of this.listeners) f(ev); }
+
+  /**
+   * Record a moment for the after-action. `rank` is how much it mattered, so
+   * the debrief can show the top of a busy watch rather than the start of it.
+   */
+  moment(rank, text) {
+    const m = this.stats.moments;
+    m.push({ t: this.time - this.startedAt, rank, text });
+    // A hard cap. If a long action overflows it, drop the least important
+    // half rather than the oldest — the opening contact still matters at 21:00.
+    if (m.length > 240) {
+      m.sort((x, y) => y.rank - x.rank || x.t - y.t);
+      m.length = 120;
+      m.sort((x, y) => x.t - y.t);
+    }
+  }
 
   picture(side) { return this.tables[side]; }
 
@@ -151,6 +175,27 @@ export class World {
     }
     for (const side of [SIDE.BLUE, SIDE.RED]) this.tables[side].step(dt, now);
 
+    /*
+     * Time to a weapons-quality track. This stat was declared, scored and
+     * written into the after-action text, and nothing ever assigned it — so
+     * every debrief ever shown told the player they never developed one, and
+     * the score line for it never fired. It is the single number this game is
+     * about: detection is not targeting.
+     */
+    if (this.stats.timeToFirstWeaponsQuality === null) {
+      for (const t of this.tables[SIDE.BLUE].tracks.values()) {
+        // Surface and subsurface only. A radar fix on an inbound bomber is
+        // free and instantaneous, and counting it would report "two seconds to
+        // weapons quality" on a watch where the enemy surface group was never
+        // localised at all — which is the opposite of what this measures.
+        if (!t.weaponsQuality || t.truthRef?.side !== SIDE.RED) continue;
+        if (t.domain !== DOMAIN.SURFACE && t.domain !== DOMAIN.SUBSURFACE) continue;
+        this.stats.timeToFirstWeaponsQuality = now - this.startedAt;
+        this.moment(8, `Weapons-quality track on ${t.id} — ${t.classification.toLowerCase()}.`);
+        break;
+      }
+    }
+
     this.red.step(dt, now);
     this.blueAuto.step(dt, now);
 
@@ -203,6 +248,10 @@ export class World {
         trackId: t.id,
       });
       this.emit({ type: 'CONTACT', track: t, unit: e.unit, source: e.source });
+      if (!this._firstContact && t.identity !== IDENT.FRIEND) {
+        this._firstContact = true;
+        this.moment(6, `First contact — ${t.classification.toLowerCase()} bearing ${String(brg).padStart(3, '0')}, held by ${e.unit.name}.`);
+      }
     } else if (e.kind === 'ILLUM' || e.kind === 'SEEKER' || e.kind === 'TORPEDO') {
       this.comms.push({ t: now, from: e.unit.name, priority: 'FLASH', text: e.text, trackId: t?.id });
       this.emit({ type: e.kind, track: t, unit: e.unit });
@@ -218,6 +267,10 @@ export class World {
       }
       if (o.category === 'SAM') this.stats.samFired++;
       this.emit({ type: 'LAUNCH', ord: o, unit: e.shooter });
+      if (o.category === 'ASM' && o.side === SIDE.BLUE && !this._firstShot) {
+        this._firstShot = true;
+        this.moment(7, `First anti-ship missile away — ${o.def.name} from ${e.shooter ? e.shooter.name : 'the task force'}.`);
+      }
     } else if (e.kind === 'HIT') {
       const tgt = e.target;
       // Remember whose weapon did it. Without this the debrief cannot tell a
@@ -237,6 +290,16 @@ export class World {
       });
       if (tgt.side === SIDE.NEUTRAL) {
         this.emit({ type: 'NEUTRAL_HIT', target: tgt });
+        this.moment(o.side === SIDE.BLUE ? 10 : 6,
+          o.side === SIDE.BLUE
+            ? `Our ${o.def.name} struck the neutral ${tgt.name}.`
+            : `A hostile round struck the neutral ${tgt.name}.`);
+      } else if (isBlue && (tgt.alive || e.killed)) {
+        this.moment(e.killed ? 9 : 7,
+          e.killed ? `${tgt.name} lost.`
+            : `${tgt.name} hit — ${Math.round((tgt.hp / tgt.maxHp) * 100)} percent capability remaining.`);
+      } else if (e.killed) {
+        this.moment(8, `${tgt.name} destroyed — ${tgt.cls.display}.`);
       }
     } else if (e.kind === 'MISS') {
       if (o.side === SIDE.BLUE) {

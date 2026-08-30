@@ -298,6 +298,14 @@ export class SignalSystem {
     }
     if (c && c.credit) this.credit += c.credit;
     if (c && c.demerit) this.demerit += c.demerit;
+    // A decision that carried real weight is part of the story of the watch,
+    // not just a line in the score.
+    const wgt = (c?.credit || 0) + (c?.demerit || 0);
+    if (wgt >= 2 || expired) {
+      this.world.moment(expired ? 7 : 6, expired
+        ? `No answer given: ${sig.subject || sig.from}.`
+        : `${sig.subject || sig.from} — ordered "${c.label}".`);
+    }
     if (expired) {
       this.world.comms.push({
         t: this.world.time, from: sig.unit ? sig.unit.name : sig.from, priority: 'ROUTINE',

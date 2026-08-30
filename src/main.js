@@ -13,6 +13,7 @@ import { serialise, deserialise, listSaves, writeSave, deleteSave } from './sim/
 import { SetupScreen } from './ui/SetupScreen.js';
 import { Encyclopedia } from './ui/Encyclopedia.js';
 import { weapon } from './sim/weapons.db.js';
+import { PLATFORMS } from './sim/platforms.db.js';
 import { loadout } from './sim/airwing.db.js';
 import {
   EMCON, EMCON_ORDER, ROE, SIDE, IDENT, DOMAIN, NM, KNOT, clamp, angDiff,
@@ -1277,15 +1278,101 @@ class Game {
   showDebrief(ev) {
     const g = ev.grade;
     const w = this.world;
+    const s = w.stats;
     $('db-title').textContent = ev.status === 'SUCCESS' ? 'MISSION ACCOMPLISHED' : 'MISSION FAILED';
     $('db-sub').textContent = ev.reason.toUpperCase();
     const rows = g.pts.map(p => `<div class="score-row">
       <div><div class="lbl">${p.label}</div><div class="det">${p.detail || ''}</div></div>
       <div class="pt${p.value < 0 ? ' neg' : ''}">${p.value > 0 ? '+' : ''}${p.value}</div></div>`).join('');
+
+    /*
+     * Name the opposition from the force that was actually there. The lessons
+     * below used to say "the Volna" and "the Volsk salvos" in every scenario,
+     * because when they were written there was only one — so a player who had
+     * just fought a submarine barrier was told about a cruiser they never saw.
+     */
+    const redSurface = w.units.filter(u => u.side === SIDE.RED && u.domain === DOMAIN.SURFACE);
+    // Losses record a class name, not a domain, so resolve it back through the
+    // platform table — otherwise the first thing shot down names the enemy, and
+    // a maritime patrol aircraft ends up "closing on" the amphibious group.
+    const sunkSurface = w.stats.redLosses
+      .map(l => Object.values(PLATFORMS).find(p => p.display === l.cls))
+      .filter(p => p && p.domain === DOMAIN.SURFACE);
+    const foe = redSurface[0]?.cls.display || sunkSurface[0]?.display || 'the opposing force';
+    const hvu = w.units.find(u => u.hvu);
+    const guarded = hvu ? hvu.name : 'the units you were covering';
+
+    // ── the decisions ────────────────────────────────────────────────────
+    // Every signal that carried weight, heaviest first. This is the part of a
+    // watch a commander is actually judged on, and until now it reached the
+    // player as a single line reading "3 signals handled well, 1 ignored".
+    let decisions = (w.signals?.log || [])
+      .filter(sig => sig.resolved && sig.choices)
+      .map(sig => {
+        const c = sig.choices.find(x => x.key === sig.answer) || null;
+        const credit = c?.credit || 0, demerit = c?.demerit || 0;
+        return { sig, c, credit, demerit, weight: credit + demerit + (sig.expired ? 1 : 0) };
+      })
+      .filter(d => d.weight > 0);
+
+    /*
+     * One signal type recurring through a long watch — three merchant maydays,
+     * say — is one decision made three times, not three decisions. Collapse it
+     * to the first, carrying a count, or a repeated routine call crowds the
+     * genuinely consequential orders out of the list entirely.
+     */
+    const seen = new Map();
+    for (const d of decisions) {
+      const k = `${d.sig.kind}|${d.sig.answer}|${d.sig.expired ? 'X' : ''}`;
+      const prev = seen.get(k);
+      if (prev) { prev.repeats = (prev.repeats || 1) + 1; continue; }
+      seen.set(k, d);
+    }
+    /*
+     * Failures first. A commander learns more from the signal that ran out
+     * than from the three they answered well, and ranking purely by points
+     * buried every expiry beneath the credits.
+     */
+    const uniq = [...seen.values()];
+    const bad = uniq.filter(d => d.sig.expired || d.demerit > 0).sort((a, b) => b.weight - a.weight);
+    const good = uniq.filter(d => !d.sig.expired && !d.demerit).sort((a, b) => b.weight - a.weight);
+    decisions = [...bad.slice(0, 4), ...good.slice(0, Math.max(2, 6 - Math.min(4, bad.length)))];
+
+    const decisionRows = decisions.map(d => {
+      const good = d.credit > 0 && !d.sig.expired;
+      const mark = d.sig.expired ? 'NO ANSWER' : good ? `+${d.credit}` : `−${d.demerit || 1}`;
+      const col = d.sig.expired || !good ? 'var(--danger)' : 'var(--good)';
+      return `<div class="score-row">
+        <div style="padding-right:16px">
+          <div class="lbl">${fmt.clock(d.sig.opened)} · ${d.sig.subject || d.sig.from}${d.repeats ? ` <span style="color:var(--dim)">×${d.repeats}</span>` : ''}</div>
+          <div class="det">${d.sig.expired
+            ? 'The deadline passed with no order from the flag; the standing orders decided it.'
+            : `You ordered: ${d.c ? d.c.label : '—'}`}</div>
+        </div>
+        <div class="pt" style="color:${col}">${mark}</div>
+      </div>`;
+    }).join('');
+
+    // ── the watch, in order ──────────────────────────────────────────────
+    // Same rule for the timeline: a line the player has already read is not
+    // news the second time, and nine slots are too few to spend on repeats.
+    const seenText = new Set();
+    const moments = [...(s.moments || [])]
+      .sort((a, b) => b.rank - a.rank || a.t - b.t)
+      .filter(m => { const k = m.text.replace(/\d+/g, '#'); if (seenText.has(k)) return false; seenText.add(k); return true; })
+      .slice(0, 9)
+      .sort((a, b) => a.t - b.t)
+      .map(m => `<div class="score-row">
+        <div><div class="lbl">${m.text}</div></div>
+        <div class="pt" style="color:var(--dim)">${fmt.clock(w.startedAt + m.t)}</div></div>`).join('');
+
+    // ── what it means ────────────────────────────────────────────────────
     const lessons = [];
-    const s = w.stats;
     if (s.timeToFirstWeaponsQuality !== null) {
-      lessons.push(`It took <b>${Math.round(s.timeToFirstWeaponsQuality / 60)} minutes</b> to develop a weapons-quality track. Every minute of that was a minute the Volna was closing on your amphibious group.`);
+      const mins = Math.round(s.timeToFirstWeaponsQuality / 60);
+      lessons.push(mins <= 25
+        ? `You had a weapons-quality track <b>${mins} minutes</b> in. Finding him first is most of this — everything downstream is easier from there.`
+        : `It took <b>${mins} minutes</b> to develop a weapons-quality track. Every one of those minutes was a minute ${foe} spent closing on ${guarded}, and a minute your own shot was not in the air.`);
     } else {
       lessons.push('You never developed a weapons-quality track. Detection is not targeting — a contact you cannot localise to within a seeker basket is a contact you cannot shoot.');
     }
@@ -1295,19 +1382,34 @@ class Game {
         ? `<b>${Math.round(eff * 100)}%</b> of your anti-ship missiles found a target. That is what maintained custody looks like.`
         : `Only <b>${Math.round(eff * 100)}%</b> of your anti-ship missiles found a target. The rest searched empty water: the track went stale between launch and arrival, or the aim point was never good enough to begin with.`);
     }
+    if (s.redAsmFired) {
+      const leaked = s.redAsmLeakers;
+      lessons.push(leaked
+        ? `${s.redAsmFired} hostile missiles were fired at you and <b>${leaked}</b> reached terminal homing on a ship. Everything that gets that far is being handled by the last two layers, and those layers do not miss often enough to rely on.`
+        : `${s.redAsmFired} hostile missiles were fired at you and none reached terminal homing. The intercepts happened far enough out that you never had to find out how good the Phalanx is.`);
+    }
     const ourNeutrals = s.neutralLosses.filter(l => l.by === SIDE.BLUE);
     const theirNeutrals = s.neutralLosses.filter(l => l.by !== SIDE.BLUE);
     if (ourNeutrals.length) {
       lessons.push(`<b>${ourNeutrals.length}</b> neutral ${ourNeutrals.length === 1 ? 'vessel was' : 'vessels were'} destroyed by our own ordnance. An active seeker takes the largest return inside its basket, and a loaded merchant is a far larger return than a warship — positive identification before launch is not a formality.`);
     }
     if (theirNeutrals.length) {
-      lessons.push(`The Volsk salvos destroyed <b>${theirNeutrals.length}</b> neutral merchant ${theirNeutrals.length === 1 ? 'vessel that was' : 'vessels that were'} nowhere near this action. Their seekers made the same choice ours would have. It is worth remembering which way that cuts: a shipping lane is cover.`);
+      lessons.push(`Hostile salvos destroyed <b>${theirNeutrals.length}</b> neutral merchant ${theirNeutrals.length === 1 ? 'vessel that was' : 'vessels that were'} nowhere near this action. Their seekers made the same choice ours would have. It is worth remembering which way that cuts: a shipping lane is cover.`);
     }
-    if (s.blueLosses.length) lessons.push(`You lost ${s.blueLosses.length} ${s.blueLosses.length === 1 ? 'unit' : 'units'}. Check whether they were radiating when the strike came in.`);
+    if (s.blueLosses.length) {
+      lessons.push(`You lost ${s.blueLosses.map(l => l.name).join(', ')}. Check whether ${s.blueLosses.length === 1 ? 'she was' : 'they were'} radiating when the strike came in.`);
+    }
+    const expired = decisions.filter(d => d.sig.expired).length;
+    if (expired) {
+      lessons.push(`<b>${expired}</b> signal${expired === 1 ? '' : 's'} ran out of time without an order from you. A deadline that passes is still a decision — it is simply one your standing orders made on your behalf.`);
+    }
+
     $('db-body').innerHTML = `
       <div class="rank ${ev.status === 'SUCCESS' ? 'good' : 'bad'}">${g.rank}</div>
       <div class="rank-pts">${g.total > 0 ? '+' : ''}${g.total} POINTS</div>
       ${rows}
+      ${moments ? `<h3 style="margin-top:22px">THE WATCH</h3>${moments}` : ''}
+      ${decisionRows ? `<h3 style="margin-top:22px">DECISIONS THAT MATTERED</h3>${decisionRows}` : ''}
       <h3 style="margin-top:22px">AFTER ACTION</h3>
       ${lessons.map(l => `<p>${l}</p>`).join('')}
     `;
