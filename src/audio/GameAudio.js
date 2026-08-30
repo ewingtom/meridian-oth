@@ -24,6 +24,9 @@ export class GameAudio {
     this._lastRadio = 0;
     this._cicNodes = null;
     this._sweepT = 0;
+    this._alarm = null;        // the single threat-alarm LoopHandle, if sounding
+    this._alarmUntil = 0;      // ctx time it should fade out at
+    this._alarmTimer = null;
   }
 
   async unlock() {
@@ -124,7 +127,64 @@ export class GameAudio {
     if (v > 0.05) this.engine.playCiwsBurst({ volume: v, gain: v });
   }
   ping(dist = 0) { if (this.ready) this.engine.playSonarPing({ volume: this._att(dist) }); }
-  klaxon() { if (this.ready) this.engine.playAlarmKlaxon({ volume: 0.55 }); }
+  /**
+   * Threat alarm. ONE alarm, ever.
+   *
+   * playAlarmKlaxon returns a LoopHandle — it is a CONTINUOUS alarm, not a
+   * one-shot — and this used to call it once per event and drop the handle on
+   * the floor, so nothing ever stopped it. Being illuminated fires an ILLUM
+   * event per emitter per sensor cycle, so one engagement layered dozens of
+   * permanent detuned sawtooth warbles that never decayed. Measured: +2.9 dB
+   * after one, +12.6 dB after nine, unchanged five seconds later, and still
+   * running at the end of the session. Nine 340-440 Hz sawtooths beating
+   * against each other is the whirring — and it was an unbounded oscillator
+   * leak besides.
+   *
+   * Now there is one alarm. Re-triggering extends how long it sounds instead
+   * of stacking another copy on top, and it fades out once nothing has
+   * threatened us for `hold` seconds. An alarm that never stops is not an
+   * alarm; it is a room tone, and it stops meaning anything.
+   */
+  alarm(hold = 2.5, volume = 0.3) {
+    if (!this.ready) return;
+    const ctx = this.engine.ctx;
+    this._alarmUntil = Math.max(this._alarmUntil || 0, ctx.currentTime + hold);
+    if (this._alarm) return;                 // already sounding — just extended
+    this._alarm = this.engine.playAlarmKlaxon({
+      volume,
+      /*
+       * Placed where the bed is NOT. The ambience peaks at 315-630 Hz, so an
+       * alarm sitting there is spectrally masked and has to be loud to be
+       * heard: measured 3.4 dB over the bed in its own band at 300-380 Hz,
+       * against 8.7 dB at 700-900 Hz for the identical level. Moving it buys
+       * audibility for free, and the old 0.55 was hot enough to drive the
+       * master compressor and duck the whole mix — which is its own reason it
+       * felt oppressive. Triangle rather than sawtooth for the same reason:
+       * being painted should read as a warning, not an assault.
+       */
+      lowFreq: 700, highFreq: 900, warbleRate: 1.6, waveform: 'triangle',
+    });
+    if (!this._alarm) return;
+    this._alarmTimer = setInterval(() => {
+      if (!this._alarm) return;
+      if (ctx.currentTime < this._alarmUntil) return;
+      this._alarm.stop(0.6);
+      this._alarm = null;
+      clearInterval(this._alarmTimer);
+      this._alarmTimer = null;
+    }, 250);
+  }
+
+  /** Silence the threat alarm immediately (mission end, menu, teardown). */
+  stopAlarm() {
+    if (this._alarm) this._alarm.stop(0.3);
+    this._alarm = null;
+    this._alarmUntil = 0;
+    if (this._alarmTimer) { clearInterval(this._alarmTimer); this._alarmTimer = null; }
+  }
+
+  /** Kept for callers that mean "something is shooting at us right now". */
+  klaxon(hold = 2.5, volume = 0.3) { this.alarm(hold, volume); }
   blip() { if (this.ready) this.engine.playRadarBlip({ volume: 0.25 }); }
 
   ui(kind) {

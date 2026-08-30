@@ -18,7 +18,10 @@ export function playAlarmKlaxon(engine, opts = {}) {
   loopGain.gain.linearRampToValueAtTime(1, t0 + 0.15);
 
   const osc = ctx.createOscillator();
-  osc.type = "sawtooth";
+  // A sawtooth at this pitch puts strong harmonics at 1.4-2.8 kHz, straight
+  // through the ear's most piercing region. Callers that only need to be heard
+  // rather than to hurt can ask for a softer waveform.
+  osc.type = opts.waveform ?? "sawtooth";
 
   const lowFreq = opts.lowFreq ?? 340;
   const highFreq = opts.highFreq ?? 440;

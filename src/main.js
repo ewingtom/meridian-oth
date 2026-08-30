@@ -332,7 +332,7 @@ class Game {
         }
         case 'RED_STRIKE': {
           this.hud.pushAlert(`VAMPIRE VAMPIRE VAMPIRE — ${ev.count} INBOUND`, 'danger', 8);
-          this.audio.klaxon();
+          this.audio.alarm(7, 0.38);
           if (this.timeScale > 4) this.setTimeScale(2);
           break;
         }
@@ -364,7 +364,8 @@ class Game {
           break;
         }
         case 'ILLUM': case 'SEEKER': case 'TORPEDO': {
-          this.audio.klaxon();
+          // A torpedo in the water holds longer than a radar painting us.
+          this.audio.alarm(ev.type === 'TORPEDO' ? 5 : 2.5, ev.type === 'TORPEDO' ? 0.34 : 0.26);
           break;
         }
         case 'NEUTRAL_HIT': {
@@ -1417,6 +1418,7 @@ class Game {
     // already reset itself to 04:10:00 with an empty roster, so two application
     // states were on screen at once for about a second.
     this.running = false;
+    this.audio.stopAlarm();
     $('hud').style.opacity = '0.25';
     this._wireScroll('db-body');
     this._showScreen('screen-debrief');
