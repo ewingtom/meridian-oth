@@ -11,6 +11,7 @@ import { buildScenario, defaultSpec, Mission } from './sim/Scenario.js';
 import { SCENARIOS } from './sim/scenarios.db.js';
 import { serialise, deserialise, listSaves, writeSave, deleteSave } from './sim/Save.js';
 import { SetupScreen } from './ui/SetupScreen.js';
+import { Encyclopedia } from './ui/Encyclopedia.js';
 import { weapon } from './sim/weapons.db.js';
 import { loadout } from './sim/airwing.db.js';
 import {
@@ -1027,6 +1028,17 @@ class Game {
    * and `.gone` takes the element out of the layout once the fade has finished,
    * so a faded-out screen still cannot eat clicks meant for the one behind it.
    */
+  /**
+   * The recognition manual. Openable from the menu, and from anywhere in a
+   * watch — passing a class or weapon id lands straight on that page, which is
+   * what makes it useful mid-engagement rather than only before one.
+   */
+  openEncyclopedia(entryId = null) {
+    if (!this.enc) this.enc = new Encyclopedia();
+    this.enc.open(entryId);
+    this._showScreen('screen-enc');
+  }
+
   _hideScreen(id) {
     const e = $(id);
     e.classList.add('hidden');
@@ -1155,6 +1167,8 @@ class Game {
     };
     $('btn-howto').onclick = () => { this._fillHelp(); this._wireScroll('help-body'); this._showScreen('screen-help'); };
     $('btn-help-close').onclick = () => this._hideScreen('screen-help');
+    $('btn-enc').onclick = () => this.openEncyclopedia();
+    $('btn-enc-close').onclick = () => this._hideScreen('screen-enc');
     this._attractShot();
     this._buildMissionPicker();
     $('btn-brief-go').onclick = () => {

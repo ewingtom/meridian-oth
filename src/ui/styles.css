@@ -18,6 +18,11 @@
   --dimmer: #536676;
   --accent: #5ec8ff;
   --accent-dim: rgba(94, 200, 255, 0.16);
+  /* Aliases. The deck panel, setup screen, saves dialog and recognition manual
+     were all written against these two names, which were never defined — so all
+     of that text inherited its colour and the hierarchy went flat. */
+  --ink: #f0f7ff;
+  --muted: #7d93a6;
   --warn: #ffc046;
   --danger: #ff5f56;
   --good: #5fdc8b;
@@ -1048,3 +1053,81 @@ body.cheap-ui #topbar {
   line-height: 1.7; padding: 18px 0;
 }
 #btn-saves { letter-spacing: .14em; }
+
+/* ── recognition manual ───────────────────────────────────────────────────
+   A list and a detail pane. Every platform and weapon in this game already
+   carries a written note about what it is FOR — they were reachable only as
+   tooltips, which is a reference book nobody can read. */
+#screen-enc .enc-wrap {
+  width: min(1180px, 95vw); height: min(840px, 90vh);
+  display: flex; flex-direction: column; gap: 12px;
+  background: var(--panel-solid); border: 1px solid var(--line-hi);
+  box-shadow: 0 30px 90px rgba(0,0,0,0.7); padding: 16px 18px;
+}
+.enc-hd { display: flex; justify-content: space-between; align-items: flex-start; flex: 0 0 auto; }
+.enc-hd h2 {
+  font-family: var(--mono); font-size: 15px; letter-spacing: .22em;
+  color: var(--accent); margin: 0 0 3px;
+}
+.enc-hd .sub { font-family: var(--mono); font-size: 10.5px; color: var(--dim); }
+.enc-tabs { display: flex; gap: 6px; flex: 0 0 auto; }
+.enc-wrap button.ghost {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+  padding: 6px 13px; text-transform: uppercase; cursor: pointer;
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 0;
+  transition: color .15s, border-color .15s;
+}
+.enc-wrap button.ghost:hover { color: var(--txt-hi); border-color: var(--line-hi); }
+.enc-tabs button.on, .enc-tabs button.on:hover {
+  color: var(--accent); border-color: var(--line-hi); background: var(--accent-dim);
+}
+.enc-cols {
+  flex: 1 1 auto; min-height: 0; display: grid;
+  grid-template-columns: 290px 1fr; gap: 14px;
+}
+.enc-list { overflow-y: auto; min-height: 0; border-right: 1px solid var(--line); padding-right: 6px; }
+.enc-item {
+  display: block; width: 100%; text-align: left; padding: 8px 10px;
+  border: 0; border-left: 2px solid transparent; background: transparent;
+  cursor: pointer; font-family: var(--mono);
+}
+.enc-item:hover { background: rgba(122,178,214,0.07); }
+.enc-item.on { background: var(--accent-dim); border-left-color: var(--accent); }
+.enc-item .n { font-size: 11.5px; color: var(--txt-hi); }
+.enc-item.on .n { color: var(--accent); }
+.enc-item .t { font-size: 9.5px; color: var(--dim); margin-top: 2px; }
+.enc-detail { overflow-y: auto; min-height: 0; padding-right: 6px; }
+.enc-detail h3 {
+  font-family: var(--mono); font-size: 16px; letter-spacing: .1em;
+  color: var(--txt-hi); margin: 0 0 4px;
+}
+.enc-detail .cls {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+  color: var(--accent); text-transform: uppercase; margin-bottom: 14px;
+}
+.enc-detail .role {
+  font-family: var(--mono); font-size: 12px; line-height: 1.7; color: var(--txt);
+  border-left: 2px solid var(--line-hi); padding-left: 12px; margin-bottom: 18px;
+}
+.enc-sec {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .16em;
+  color: var(--accent); text-transform: uppercase;
+  padding-bottom: 5px; border-bottom: 1px solid var(--line); margin: 18px 0 9px;
+}
+.enc-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 13px 18px;
+}
+.enc-kv { font-family: var(--mono); font-size: 11px; }
+.enc-kv .k { color: var(--dim); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+.enc-kv .v { color: var(--txt-hi); font-variant-numeric: tabular-nums; }
+.enc-line {
+  font-family: var(--mono); font-size: 11px; color: var(--txt);
+  padding: 5px 0; border-bottom: 1px solid rgba(122,178,214,0.08); line-height: 1.55;
+}
+.enc-line .lb { color: var(--accent); }
+.enc-line .sub { color: var(--dim); font-size: 10px; }
+@media (max-width: 820px) {
+  .enc-cols { grid-template-columns: 1fr; }
+  .enc-list { border-right: 0; border-bottom: 1px solid var(--line); max-height: 30%; }
+}
