@@ -880,8 +880,17 @@ export class Hud {
     }
   }
 
-  openSaves() {
+  /**
+   * `loadOnly` is the main-menu case. The dialog itself has always lived
+   * outside #hud and worked fine there — it was only the button that opened it
+   * that sat inside the HUD, which is display:none on the menu. So a player who
+   * closed the tab and came back had to start a mission and abandon it to reach
+   * their own save, which is the exact thing saving exists to avoid.
+   */
+  openSaves(loadOnly = false) {
     $('saves-modal').classList.add('on');
+    $('saves-new').style.display = loadOnly ? 'none' : '';
+    this._loadOnly = loadOnly;
     this._savesBody();
     this.game.audio?.ui('click');
   }
@@ -894,9 +903,10 @@ export class Hud {
     $('saves-count').textContent = `${all.length} / 6`;
     body.innerHTML = '';
     if (!all.length) {
-      body.appendChild(el('div', 'saves-empty',
-        'No saved watches yet.<br>Saving keeps the whole picture — every hull, every track, '
-        + 'the rounds in the air and the decisions you have already made.'));
+      body.appendChild(el('div', 'saves-empty', this._loadOnly
+        ? 'No saved watches yet.<br>Start a mission and use SAVES on the status bar to keep one.'
+        : 'No saved watches yet.<br>Saving keeps the whole picture — every hull, every track, '
+          + 'the rounds in the air and the decisions you have already made.'));
       return;
     }
     for (const s of all) {

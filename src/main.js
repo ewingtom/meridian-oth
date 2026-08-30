@@ -626,6 +626,8 @@ class Game {
   _key(e) {
     const k = e.code;
     if (k === 'Escape') {
+      const enc = $('screen-enc');
+      if (enc && !enc.classList.contains('gone')) { this._hideScreen('screen-enc'); return; }
       if (this.hud.engage) { this.hud.closeEngage(); return; }
       if (this.pendingOrder) { this.pendingOrder = null; return; }
       if (this.cam.mode === CAM.MISSILE) { this.cam.exitMissile(); return; }
@@ -683,6 +685,7 @@ class Game {
       return;
     }
     if (k === 'KeyT') { this.overlay.showWeb = !this.overlay.showWeb; return; }
+    if (k === 'F1') { e.preventDefault(); this.openEncyclopedia(this._manualSubject()); return; }
     if (k === 'KeyR') { this.overlay.showRings = !this.overlay.showRings; return; }
     if (k === 'KeyL') { this.overlay.showLabels = !this.overlay.showLabels; return; }
     if (k === 'KeyG') { this.beginOrder('MOVE'); return; }
@@ -1062,6 +1065,19 @@ class Game {
    * watch — passing a class or weapon id lands straight on that page, which is
    * what makes it useful mid-engagement rather than only before one.
    */
+  /**
+   * What the manual should open on: whatever the player is looking at. A
+   * selected own unit opens its own class; a designated contact opens the class
+   * it has been identified as, when we know it well enough to say.
+   */
+  _manualSubject() {
+    const u = this.selection[0];
+    if (u) return u.cls.id;
+    const t = this.selectedTrack;
+    if (t && t.truthRef && t.identityLocked) return t.truthRef.cls.id;
+    return null;
+  }
+
   openEncyclopedia(entryId = null) {
     if (!this.enc) this.enc = new Encyclopedia();
     this.enc.open(entryId);
@@ -1197,6 +1213,8 @@ class Game {
     $('btn-howto').onclick = () => { this._fillHelp(); this._wireScroll('help-body'); this._showScreen('screen-help'); };
     $('btn-help-close').onclick = () => this._hideScreen('screen-help');
     $('btn-enc').onclick = () => this.openEncyclopedia();
+    $('btn-load').onclick = () => { this.audio.unlock(); this.hud.openSaves(true); };
+    $('btn-manual').onclick = () => this.openEncyclopedia(this._manualSubject());
     $('btn-enc-close').onclick = () => this._hideScreen('screen-enc');
     this._attractShot();
     this._buildMissionPicker();

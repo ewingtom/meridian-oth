@@ -1,6 +1,6 @@
 import { buildScenario, Mission } from './Scenario.js';
 import { Track } from './Tracks.js';
-import { GENERATORS } from './Signals.js';
+import { GENERATORS, Signal } from './Signals.js';
 
 /**
  * Saving and loading a watch.
@@ -194,6 +194,26 @@ export function serialise(game) {
       // asked to pose them again on load. See the note at the top.
       active: w.signals.active.filter(s => !s.resolved && s.choices)
         .map(s => ({ kind: s.kind, deadline: s.deadline })),
+      lastSignalAt: w.signals.lastSignalAt ?? null,
+      /*
+       * The decisions already made. The debrief's DECISIONS THAT MATTERED
+       * panel is built from signals.log, and nothing here saved it — so
+       * loading a watch silently threw away every decision the player had
+       * taken, while credit and demerit survived. The score then read "3
+       * signals handled well" above an empty panel.
+       *
+       * A Signal carries closures, so what travels is the record of what was
+       * decided: which question, when, what was ordered, and what it was
+       * worth. That is exactly what the debrief reads back.
+       */
+      history: w.signals.log.filter(s => s.resolved && s.choices).map((s) => {
+        const c = (s.choices || []).find(x => x.key === s.answer) || null;
+        return {
+          kind: s.kind, subject: s.subject, from: s.from, opened: s.opened,
+          answer: s.answer, expired: !!s.expired,
+          label: c ? c.label : null, credit: c?.credit || 0, demerit: c?.demerit || 0,
+        };
+      }),
     },
     mission: {
       status: game.mission.status, phase: game.mission.phase,
@@ -312,6 +332,16 @@ export function deserialise(save) {
   sg.recentUnit = new Map(ss.recentUnit);
   sg.beats = ss.beats.map(b => ({ ...b }));
   sg.standing = JSON.parse(JSON.stringify(ss.standing));
+  if (ss.lastSignalAt != null) sg.lastSignalAt = ss.lastSignalAt;
+  // Replay the decision history as resolved entries. The single restored
+  // choice is enough: the debrief only ever looks up the one that was taken.
+  sg.log = (ss.history || []).map((h) => Object.assign(Object.create(Signal.prototype), {
+    kind: h.kind, subject: h.subject, from: h.from, opened: h.opened,
+    priority: 'ROUTINE', text: h.subject || h.from, detail: '',
+    resolved: true, answer: h.answer, expired: h.expired,
+    unit: null, track: null, pin: null, urgency: 1, deadline: null,
+    choices: h.label === null ? [] : [{ key: h.answer, label: h.label, credit: h.credit, demerit: h.demerit }],
+  }));
   sg.active = [];
   for (const a of ss.active) {
     const gen = GENERATORS.find(g => g.kind === a.kind);
