@@ -851,6 +851,50 @@ export class Hud {
     gA.appendChild(rowA2);
     body.appendChild(gA);
 
+    /*
+     * Damage control. Only shown when there is something to control — a panel
+     * of four zeroed bars on an undamaged ship is noise. One party, one
+     * priority, and the honest note that speed is what decides whether any of
+     * it works.
+     */
+    if (sel.length === 1 && !u.isAir) {
+      const d = u.damage;
+      const worst = Math.max(d.fire, d.flooding, d.mobility, d.sensors, d.weapons);
+      if (worst > 0.04 || u.hp < u.maxHp * 0.98) {
+        const gDc = el('div', 'ord-group');
+        gDc.appendChild(el('div', 'k', 'Damage control'));
+        const bars = el('div', 'dc-bars');
+        for (const [lbl, v, crit] of [['FIRE', d.fire, true], ['FLOOD', d.flooding, true],
+          ['PROP', d.mobility, false], ['SENS', d.sensors, false], ['WPNS', d.weapons, false]]) {
+          const row = el('div', 'dc-row');
+          row.appendChild(el('span', 'dc-l', lbl));
+          const bar = el('div', 'dc-bar');
+          const fill = el('div', 'dc-fill');
+          fill.style.width = `${Math.round(clamp(v, 0, 1) * 100)}%`;
+          if (v > 0.5 && crit) fill.style.background = 'var(--danger)';
+          else if (v > 0.25) fill.style.background = 'var(--warn)';
+          bar.appendChild(fill);
+          row.appendChild(bar);
+          bars.appendChild(row);
+        }
+        gDc.appendChild(bars);
+        const rowDc = el('div', 'btn-row');
+        for (const [nm, key] of [['AUTO', 'AUTO'], ['FIRE', 'FIRE'], ['FLOOD', 'FLOOD'],
+          ['PROP', 'MOBILITY'], ['SYS', 'SYSTEMS']]) {
+          const b = el('button', (u.dcPriority || 'AUTO') === key ? 'on' : '', nm);
+          b.onclick = () => { u.dcPriority = key; this.game.audio?.ui('click'); };
+          rowDc.appendChild(b);
+        }
+        gDc.appendChild(rowDc);
+        const kt = Math.round(u.speed * 1.94384);
+        gDc.appendChild(el('div', 'sel-sub',
+          kt > 22 ? `${kt} kt — the party is holding on; slow to work the damage`
+            : kt > 12 ? `${kt} kt — the party is working, but not freely`
+              : `${kt} kt — the party has the run of the ship`));
+        body.appendChild(gDc);
+      }
+    }
+
     // Flight deck. A button rather than the panel itself: the deck needs more
     // room than the selection strip has, so it opens as a dialog.
     if (sel.length === 1 && u.deck && (u.cls.aircraft || []).length) {

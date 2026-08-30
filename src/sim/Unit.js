@@ -52,6 +52,8 @@ export class Unit {
     this.hp = cls.hp;
     this.maxHp = cls.hp;
     this.damage = { mobility: 0, sensors: 0, weapons: 0, fire: 0, flooding: 0 };
+    /** Where the ship's one damage-control party is committed. */
+    this.dcPriority = 'AUTO';
 
     // Magazines
     this.mags = {};
@@ -222,6 +224,70 @@ export class Unit {
     return this.cls.maxSpeed * (1 - this.damage.mobility * 0.8);
   }
 
+  /**
+   * One party, one priority. AUTO sends it at whatever is closest to killing
+   * the ship, which is what a competent crew does without being told.
+   */
+  _damageControl(dt) {
+    const d = this.damage;
+    // Effectiveness falls off hard with speed. At 8 kt or less the party has
+    // the run of the ship; above about 22 kt they are holding on.
+    const kt = this.speed * 1.94384;
+    const effort = clamp(1.25 - Math.pow(clamp(kt / 26, 0, 1), 1.4) * 1.15, 0.12, 1.25)
+      * (1 - 0.45 * clamp((this.crewLost || 0), 0, 1));
+
+    let focus = this.dcPriority || 'AUTO';
+    if (focus === 'AUTO') {
+      // Whatever is going to sink us soonest.
+      focus = d.flooding > 0.15 ? 'FLOOD'
+        : d.fire > 0.12 ? 'FIRE'
+          : d.mobility > 0.3 ? 'MOBILITY' : 'SYSTEMS';
+    }
+    const rate = (k) => (focus === k ? 0.030 : 0.006) * effort * dt;
+
+    if (d.fire > 0.001) {
+      this.hp -= d.fire * 0.22 * dt;
+      d.fire = clamp(d.fire - rate('FIRE'), 0, 1);
+      // An unattended fire spreads into the machinery spaces.
+      if (focus !== 'FIRE') d.mobility = clamp(d.mobility + dt * 0.0025 * d.fire, 0, 1);
+    }
+    if (d.flooding > 0.001) {
+      this.hp -= d.flooding * 0.30 * dt;
+      d.flooding = clamp(d.flooding - rate('FLOOD') * 0.55, 0, 1);
+      d.mobility = clamp(d.mobility + dt * 0.004 * d.flooding, 0, 1);
+    }
+    // These three never recovered at all before. They come back slowly, and
+    // only as far as the hull itself allows — a ship at ten percent is not
+    // going to have her arrays back however hard the party works.
+    const ceiling = 1 - clamp(this.hp / this.maxHp, 0, 1);
+    d.mobility = clamp(Math.max(ceiling * 0.6, d.mobility - rate('MOBILITY') * 0.5), 0, 1);
+    d.sensors = clamp(Math.max(ceiling * 0.6, d.sensors - rate('SYSTEMS') * 0.5), 0, 1);
+    d.weapons = clamp(Math.max(ceiling * 0.6, d.weapons - rate('SYSTEMS') * 0.5), 0, 1);
+    // Downed sensors can be brought back once the party has the systems in hand.
+    if (focus === 'SYSTEMS' && d.sensors < 0.35) {
+      for (const sn of this.sensors) {
+        if (!sn.ok && Math.random() < 0.02 * dt * effort) sn.ok = true;
+      }
+    }
+    /*
+     * One call, once, when the ship is genuinely in trouble and going too fast
+     * to do anything about it. A comms line rather than a decision card: the
+     * player already has the lever and the panel, and the last thing a watch
+     * needs is another thing to click.
+     */
+    if (!this._dcCalled && this.world && this.side === 'BLUE'
+        && (d.flooding > 0.3 || d.fire > 0.45) && this.speed * 1.94384 > 18) {
+      this._dcCalled = true;
+      this.world.comms.push({
+        t: this.world.time, from: this.name, priority: 'FLASH',
+        text: d.flooding > 0.3
+          ? 'Taking water and we cannot hold it at this speed. Request permission to reduce.'
+          : 'Fire is beating us at this speed. Recommend we come down and let the party work.',
+      });
+    }
+    if (this.hp <= 0) { this.alive = false; this.hp = 0; }
+  }
+
   /** Apply damage; returns true if this killed the unit. */
   applyDamage(amount, kind = 'BLAST') {
     if (!this.alive) return false;
@@ -302,19 +368,23 @@ export class Unit {
       this.fuel = Math.max(0, this.fuel - dt * burn);
     }
 
-    // Damage progression: fires spread and flooding drags you down unless the
-    // damage-control party gets ahead of it.
-    if (this.damage.fire > 0.02) {
-      this.hp -= this.damage.fire * 0.22 * dt;
-      this.damage.fire = clamp(this.damage.fire - dt * 0.010, 0, 1);
-      if (this.hp <= 0) { this.alive = false; this.hp = 0; }
-    }
-    if (this.damage.flooding > 0.02) {
-      this.hp -= this.damage.flooding * 0.30 * dt;
-      this.damage.flooding = clamp(this.damage.flooding - dt * 0.004, 0, 1);
-      this.damage.mobility = clamp(this.damage.mobility + dt * 0.004 * this.damage.flooding, 0, 1);
-      if (this.hp <= 0) { this.alive = false; this.hp = 0; }
-    }
+    /*
+     * DAMAGE CONTROL.
+     *
+     * Fire and flooding used to bleed away at a fixed rate no matter what the
+     * player did, and mobility, sensors and weapons never repaired at all — so
+     * a mission-killed ship stayed mission-killed for the rest of the watch and
+     * the player watched all of it happen without a lever. A ship has ONE
+     * damage-control party. Where it is sent is a real decision, because it is
+     * not anywhere else while it is there.
+     *
+     * The dilemma that makes it a decision is speed. You cannot fight a fire
+     * effectively at thirty knots — the party is thrown about, the ship is
+     * driving air through the compartments, and shoring does not hold. So the
+     * ship that most needs to run is the one that can least afford to. That is
+     * the trade the player should be making under a raid.
+     */
+    if (!this.isAir) this._damageControl(dt);
 
     // Emission state derived from EMCON posture
     const info = EMCON_INFO[this.ordered.emcon];
