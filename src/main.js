@@ -8,7 +8,7 @@ import { TacticalOverlay } from './ui/TacticalOverlay.js';
 import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { buildScenario, defaultSpec, Mission } from './sim/Scenario.js';
-import { SCENARIOS } from './sim/scenarios.db.js';
+import { SCENARIOS, scenarioById } from './sim/scenarios.db.js';
 import { serialise, deserialise, listSaves, writeSave, deleteSave } from './sim/Save.js';
 import { SetupScreen } from './ui/SetupScreen.js';
 import { Encyclopedia } from './ui/Encyclopedia.js';
@@ -1210,25 +1210,29 @@ class Game {
     const s = this.world.scenario;
     // The seed is printed so a sortie can be replayed or handed on. Every game
     // generates a new one; ?seed=N reruns exactly this sea.
+    // The heading was static markup, so every mission was titled OPERATION
+    // NORTH ANCHOR regardless of which one had been built.
+    $('brief-title').textContent = s.name;
     $('brief-sub').textContent = `${s.subtitle.toUpperCase()} · SORTIE ${s.seed}`;
     const oob = this.world.units.filter(u => u.side === SIDE.BLUE)
       .map(u => `<div style="display:flex;justify-content:space-between"><span>${u.hullNo ? u.hullNo + '  ' : ''}${u.name}</span><span style="color:var(--dim)">${u.cls.display}</span></div>`).join('');
+    /*
+     * Everything here comes from the scenario. It used to be half generic and
+     * half hardcoded: the stamp read OPERATION NORTH ANCHOR and the commander's
+     * intent named GRANITE BAY, POINT OSCAR and KEARSARGE BAY — in all five
+     * missions. A player who picked HAMMERFALL got a HAMMERFALL world with a
+     * NORTH ANCHOR briefing, and reasonably concluded the picker was broken.
+     */
+    const def = scenarioById(s.id);
     $('brief-body').innerHTML = `
-      <div class="stamp">SECRET // OPERATION NORTH ANCHOR // TASK FORCE 44 // ${fmt.clock(this.world.time)}Z</div>
+      <div class="stamp">SECRET // ${s.name} // ${fmt.clock(this.world.time)}Z</div>
       <h3>SITUATION</h3>
       ${s.briefing.map(p => `<p>${p}</p>`).join('')}
-      <h3 style="margin-top:22px">ORDER OF BATTLE — TASK FORCE 44</h3>
+      <h3 style="margin-top:22px">ORDER OF BATTLE</h3>
       <div style="font-size:11px;line-height:1.9;color:var(--txt)">${oob}</div>
       <h3 style="margin-top:22px">COMMANDER'S INTENT</h3>
-      <p>Find the surface action group before it finds you. Build a firing solution out of
-      whatever sensors you can put over the horizon, keep custody of it while your missiles
-      are in the air, and get GRANITE BAY to POINT OSCAR.</p>
-      <p>KEARSARGE BAY is your reach. Her wing can put weapons where no launcher in this
-      force can, but a deck is a queue — an anti-ship fit is thirty minutes of ordnance work
-      per aircraft, and nothing is catapulted while somebody is landing. Decide what you are
-      building before you know you need it.</p>
-      <p style="color:var(--dim);font-size:11px">Positive identification before launch. There is neutral
-      traffic all over this water, and a seeker cannot tell a frigate from a container ship.</p>
+      ${(def.intent || []).map(p => `<p>${p}</p>`).join('')}
+      ${def.caution ? `<p style="color:var(--dim);font-size:11px">${def.caution}</p>` : ''}
     `;
   }
 

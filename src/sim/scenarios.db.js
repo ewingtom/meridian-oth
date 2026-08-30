@@ -83,6 +83,11 @@ export const SCENARIOS = [
       'Find him. Get a weapons-quality track. Hold it long enough for your missiles to arrive. And keep your emissions off the air until the moment shooting is better than hiding.',
     ],
     objectivePoint: { x: 30000, z: 20000, name: 'POINT OSCAR', radius: 30000 },
+    intent: [
+      'Find the surface action group before it finds you. Build a firing solution out of whatever sensors you can put over the horizon, keep custody of it while your missiles are in the air, and get GRANITE BAY to POINT OSCAR.',
+      'KEARSARGE BAY is your reach. Her wing can put weapons where no launcher in this force can, but a deck is a queue — an anti-ship fit is thirty minutes of ordnance work per aircraft, and nothing is catapulted while somebody is landing. Decide what you are building before you know you need it.',
+    ],
+    caution: 'Positive identification before launch. There is neutral traffic all over this water, and a seeker cannot tell a frigate from a container ship.',
     hints: true,
     objectives: [
       { id: 'FIND', text: 'Locate the Volsk surface action group', detail: 'Gain a track of any quality on a hostile surface combatant', key: true,
@@ -156,6 +161,11 @@ export const SCENARIOS = [
       'Kill him before he reaches the lane. If you cannot kill him, at least hold contact — a submarine being tracked is a submarine that cannot set up.',
     ],
     objectivePoint: { x: -20000, z: -30000, name: 'BARRIER CENTRE', radius: 40000 },
+    intent: [
+      'Hold the barrier. Something is trying to get through it submerged, and the only thing that finds a quiet boat is patience and a sensor in the right water — a towed array below the layer, or buoys laid where he has to cross.',
+      'Your helicopters are the reach here, not your missiles. A dipping sonar puts an ear anywhere you like for twenty minutes at a time, and a barrier laid an hour ago has run out of battery. Relay them so the line never has a hole in it.',
+    ],
+    caution: 'Active sonar finds him faster and tells him exactly where you are. Choose deliberately which of those two you would rather have.',
     objectives: [
       { id: 'DETECT', text: 'Gain contact on the submarine', detail: 'Any track, any quality, on the subsurface contact', key: true,
         check: (w, m, c) => c.subTracks.length > 0 },
@@ -217,6 +227,11 @@ export const SCENARIOS = [
       'And keep custody. The missiles fly at the track, not at the ship — if the fix goes stale while they are in the air, they will search the water where he used to be.',
     ],
     objectivePoint: { x: 30000, z: 20000, name: 'POINT OSCAR', radius: 30000 },
+    intent: [
+      'This is a deck problem wearing a strike problem\'s clothes. The air wing can reach further than anything else in the force, but an anti-ship fit is thirty minutes of ordnance work per aircraft, nothing launches while somebody is recovering, and the window does not wait for you.',
+      'Decide the package before you have the track. If you start building the strike when the solution firms up, the solution will be stale by the time the aircraft are ready.',
+    ],
+    caution: 'A strike launched at a track you have stopped watching is a strike at where he used to be.',
     objectives: [
       { id: 'ARMED', text: 'Build a strike package', detail: 'Four or more aircraft armed with an anti-ship fit', key: true,
         check: (w) => w.units.some(u => u.alive && u.deck
@@ -281,6 +296,11 @@ export const SCENARIOS = [
       'Positive identification before launch. Take the time. The one thing worse than a hostile getting through is a neutral that did not.',
     ],
     objectivePoint: { x: 40000, z: 60000, name: 'WAYPOINT ROMEO', radius: 34000 },
+    intent: [
+      'This water is full of people who are not shooting at you. Get the task force through it without killing any of them, and without letting the one that is hostile get inside your screen because you were being careful.',
+      'Identification is the whole mission. An emitter fingerprint, a visual pass by a helicopter, a course that makes no commercial sense — build the picture before the rules of engagement force your hand rather than after.',
+    ],
+    caution: 'Every round you fire here is one you will have to justify. So is every one you did not.',
     objectives: [
       { id: 'ID', text: 'Positively identify six surface contacts', detail: 'Visual or electro-optical identification — not a radar return', key: true,
         check: (w, m, c) => c.table.list.filter(t => t.identityLocked && t.domain === DOMAIN.SURFACE).length >= 6 },
@@ -345,6 +365,11 @@ export const SCENARIOS = [
       'Keep GRANITE BAY and CAPE HATTERAS afloat for ninety minutes. That is the whole mission.',
     ],
     objectivePoint: { x: -20000, z: -140000, name: 'STATION KILO', radius: 50000 },
+    intent: [
+      'The salvo is already in the air. Layer the defence: SM-2 reaches furthest and needs a fire-control channel, ESSM is quad-packed and quick, RAM and the Phalanx are what is left when everything upstream has failed.',
+      'Soft kill costs nothing and works more often than anyone admits. Spend decoys early — a seeker that takes the Nulka is a round you never had to shoot at.',
+    ],
+    caution: 'Keep GRANITE BAY and CAPE HATTERAS afloat. Nothing else on this sheet matters if they are not.',
     objectives: [
       { id: 'SURVIVE', text: 'Both high value units survive the raid', key: true, negative: true,
         check: (w, m, c) => c.hvus.length > 0 && c.hvus.every(u => u.alive) },
