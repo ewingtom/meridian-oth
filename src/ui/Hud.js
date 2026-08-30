@@ -5,6 +5,7 @@ import {
 import { QUALITY_TIERS } from '../core/renderer.js';
 import { weapon, WEAPONS } from '../sim/weapons.db.js';
 import { loadout, loadoutsFor } from '../sim/airwing.db.js';
+import { listSaves, deleteSave } from '../sim/Save.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, html) => {
@@ -139,6 +140,9 @@ export class Hud {
 
     $('eng-cancel').onclick = () => this.closeEngage();
     $('deck-close').onclick = () => this.closeDeck();
+    $('saves-close').onclick = () => this.closeSaves();
+    $('saves-new').onclick = () => { this.game.saveGame(); this._savesBody(); };
+    $('btn-saves').onclick = () => this.openSaves();
     $('eng-fire').onclick = () => this.confirmEngage();
   }
 
@@ -873,6 +877,41 @@ export class Hud {
         ? `⚠ ${down.length} sensor(s) out of action`
         : `${u.sensors.length} sensors online · ${u.fcChannels} FC channels`));
       body.appendChild(gM);
+    }
+  }
+
+  openSaves() {
+    $('saves-modal').classList.add('on');
+    this._savesBody();
+    this.game.audio?.ui('click');
+  }
+
+  closeSaves() { $('saves-modal').classList.remove('on'); }
+
+  _savesBody() {
+    const body = $('saves-body');
+    const all = listSaves();
+    $('saves-count').textContent = `${all.length} / 6`;
+    body.innerHTML = '';
+    if (!all.length) {
+      body.appendChild(el('div', 'saves-empty',
+        'No saved watches yet.<br>Saving keeps the whole picture — every hull, every track, '
+        + 'the rounds in the air and the decisions you have already made.'));
+      return;
+    }
+    for (const s of all) {
+      const row = el('div', 'save-row');
+      const when = new Date(s.at);
+      const left = el('div');
+      left.appendChild(el('div', 'sl', s.label));
+      left.appendChild(el('div', 'sw',
+        `saved ${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`));
+      const load = el('button', 'act', 'Load');
+      load.onclick = () => this.game.loadGame(s.at);
+      const del = el('button', 'del', 'Delete');
+      del.onclick = () => { deleteSave(s.at); this._savesBody(); this.game.audio?.ui('click'); };
+      row.append(left, load, del);
+      body.appendChild(row);
     }
   }
 

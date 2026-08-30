@@ -132,6 +132,9 @@ export function buildScenario(specOrSeed, scenarioId) {
   };
 
   const world = new World(scenario);
+  // The world keeps the spec it was built from, so a save can rebuild this
+  // exact order of battle rather than re-rolling a fresh one.
+  world.spec = spec;
   world.time = scenario.startTime;
   world.startedAt = scenario.startTime;
 

@@ -23,6 +23,7 @@
       </div>
       <div class="seg"><span class="k">Phase</span><span id="phase-pill">SEARCH</span></div>
       <div class="seg hide-sm"><span class="k">Sea</span><span class="v" id="env-readout">SS3 · VIS 12 nm</span></div>
+      <div class="seg"><button id="btn-saves" class="tc-btn" title="Save or load this watch">SAVES</button></div>
       <div class="seg"><span class="k">Graphics</span><div class="tc-btns" id="gfx"></div></div>
       <div class="seg grow" style="justify-content:flex-end">
         <span class="k" id="obj-hint">Objective</span>
@@ -101,6 +102,17 @@
       <div class="dlg-btns">
         <button class="act" id="eng-cancel">Cancel</button>
         <button class="act danger" id="eng-fire">Batteries Release</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="saves-modal">
+    <div id="saves-box">
+      <div class="hd"><span>SAVED WATCHES</span><span id="saves-count"></span></div>
+      <div class="bd" id="saves-body"></div>
+      <div class="dlg-btns">
+        <button class="act" id="saves-new">Save this watch</button>
+        <button class="act" id="saves-close">Close</button>
       </div>
     </div>
   </div>

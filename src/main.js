@@ -9,6 +9,7 @@ import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
 import { buildScenario, defaultSpec, Mission } from './sim/Scenario.js';
 import { SCENARIOS } from './sim/scenarios.db.js';
+import { serialise, deserialise, listSaves, writeSave, deleteSave } from './sim/Save.js';
 import { SetupScreen } from './ui/SetupScreen.js';
 import { weapon } from './sim/weapons.db.js';
 import { loadout } from './sim/airwing.db.js';
@@ -27,6 +28,25 @@ const $ = (id) => document.getElementById(id);
  * re-sailed a battle the player set up once, including the browser restoring
  * the tab days later.
  */
+/**
+ * Pick up a save the player asked to load, and consume it.
+ *
+ * Read-and-clear for the same reason the setup handoff is: a restore is for the
+ * launch it was requested for. Left in place, every later reload would silently
+ * resurrect the same watch — including the browser restoring the tab days later.
+ */
+function readLoadRequest() {
+  try {
+    const raw = sessionStorage.getItem('oth.load');
+    if (!raw) return null;
+    sessionStorage.removeItem('oth.load');
+    const o = JSON.parse(raw);
+    return (o && o.spec && o.units) ? o : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function readSetupHandoff() {
   try {
     const raw = sessionStorage.getItem('oth.setup');
@@ -62,18 +82,32 @@ class Game {
      * every launch is new.
      */
     const handoff = readSetupHandoff();
+    const restore = readLoadRequest();
     const q = new URLSearchParams(location.search);
     const seedParam = q.get('seed');
     // ?mission=ALPHA picks one directly; otherwise the menu chooses.
-    this.missionId = handoff ? (handoff.spec.scenario || 'NORTH_ANCHOR')
-      : (q.get('mission') || 'NORTH_ANCHOR');
-    this.world = buildScenario(
-      handoff ? handoff.spec
-        : (seedParam ? (parseInt(seedParam, 10) | 0) : undefined),
-      this.missionId,
-    );
+    this.missionId = restore ? restore.scenario
+      : handoff ? (handoff.spec.scenario || 'NORTH_ANCHOR')
+        : (q.get('mission') || 'NORTH_ANCHOR');
+
+    if (restore) {
+      // A saved watch rebuilds its own world and mission together — the state
+      // is written over a world built from the same spec, so everything downstream
+      // is constructed against the finished article exactly as it would be for a
+      // new game.
+      const r = deserialise(restore);
+      this.world = r.world;
+      this.mission = r.mission;
+      this._restored = restore;
+    } else {
+      this.world = buildScenario(
+        handoff ? handoff.spec
+          : (seedParam ? (parseInt(seedParam, 10) | 0) : undefined),
+        this.missionId,
+      );
+      this.mission = new Mission(this.world);
+    }
     this._handoff = handoff;
-    this.mission = new Mission(this.world);
     this.world.mission = this.mission;
 
     this.view = new SceneView(this.pipeline, this.cam, this.world);
@@ -732,6 +766,43 @@ class Game {
       this.hud.pushAlert(`${parent.name} — no aircraft available`, 'warn', 4);
     }
     this.hud.dirty = true;
+  }
+
+  // ── save and load ─────────────────────────────────────────────────────────
+  saveGame() {
+    if (!this.running) { this.hud.pushAlert('Nothing to save yet', 'warn', 3); return; }
+    const r = writeSave(this);
+    if (r.ok) {
+      this.audio.ui('confirm');
+      this.hud.pushAlert(`WATCH SAVED — ${r.count} save${r.count === 1 ? '' : 's'} held`
+        + (r.trimmed ? ' (older ones dropped for space)' : ''), 'info', 4);
+    } else {
+      this.audio.ui('deny');
+      this.hud.pushAlert(r.error || 'Save failed', 'danger', 6);
+    }
+    this.hud.dirty = true;
+  }
+
+  /**
+   * Loading goes through a reload, like every other change of world in this
+   * game. The view, HUD, overlay and inset are all wired to the world they were
+   * constructed with, and swapping it underneath them leaves every unit view
+   * pointing at a ship that no longer exists.
+   */
+  loadGame(at) {
+    const rec = listSaves().find(s => s.at === at);
+    if (!rec) { this.audio.ui('deny'); return; }
+    try {
+      sessionStorage.setItem('oth.load', JSON.stringify(rec.data));
+    } catch (e) {
+      this.hud.pushAlert('Could not hand the save across — storage is full', 'danger', 6);
+      return;
+    }
+    location.reload();
+  }
+
+  openSaves() {
+    this.hud.openSaves();
   }
 
   // ── flight deck ───────────────────────────────────────────────────────────
@@ -1816,6 +1887,25 @@ async function boot() {
   step(100, 'READY');
   $('loading').classList.add('hidden');
   game.frame();
+
+  /*
+   * A restored watch goes straight back in, not to the briefing.
+   *
+   * The player did not ask to start a mission — they asked to carry on with one
+   * that is already three hours old. Showing them the opening brief for a
+   * situation that has long since moved on, and asking them to press Begin, is
+   * a menu standing between them and their own game.
+   */
+  if (game._restored) {
+    for (const id of ['screen-menu', 'screen-brief']) $(id).classList.add('hidden', 'gone');
+    $('hud').style.display = '';
+    game.running = true;
+    game.setTimeScale(game._restored.timeScale || 1);
+    game._attract = null;
+    game._opening = null;
+    game.cam.setTactical({ x: game.world.blueGuide.x, z: game.world.blueGuide.z });
+    game.hud.pushAlert(`WATCH RESTORED — ${game.world.scenario.name.replace(/^OPERATION /, '')}`, 'info', 5);
+  }
 
   // Straight to the briefing when the player has just composed this engagement.
   // Sending them back to the main menu to press Begin a second time would be
