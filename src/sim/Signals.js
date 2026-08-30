@@ -58,6 +58,17 @@ export class Signal {
 
 const MIN = 60;
 
+/** Guaranteed quiet between opportunistic signals. See the note in step(). */
+const MIN_GAP = 26 * MIN;
+
+/**
+ * How long a watch is left alone at the start. The opening is when the player
+ * is still reading the plot and working out what they have; it is the worst
+ * possible moment to start asking them questions, and it was the busiest —
+ * measured at seven signals in the first hour against three an hour after it.
+ */
+const SETTLE = 7 * MIN;
+
 /**
  * When the flag is going to talk to you, regardless of what your own captains
  * happen to be asking for at that moment.
@@ -76,10 +87,10 @@ const MIN = 60;
 const SCHEDULED = [
   // The air plan comes first, before anything else asks for a decision. It is
   // how the player finds out there is a carrier and what a deck costs.
-  { kind: 'AIRPLAN', from: 3 * MIN, to: 6 * MIN },
-  { kind: 'EMCON_WINDOW', from: 6 * MIN, to: 14 * MIN },
-  { kind: 'WEAPONS_FREE', from: 16 * MIN, to: 34 * MIN },
-  { kind: 'CONVOY', from: 32 * MIN, to: 62 * MIN },
+  { kind: 'AIRPLAN', from: 4 * MIN, to: 10 * MIN },
+  { kind: 'EMCON_WINDOW', from: 22 * MIN, to: 38 * MIN },
+  { kind: 'WEAPONS_FREE', from: 46 * MIN, to: 72 * MIN },
+  { kind: 'CONVOY', from: 84 * MIN, to: 120 * MIN },
 ];
 
 export class SignalSystem {
@@ -151,7 +162,7 @@ export class SignalSystem {
     if (this._t < this._nextPoll) return;
     this._t = 0;
     this._nextPoll = this.rng.range(6, 15);
-    if (this.active.length >= 3) return;      // never more than three open decisions
+    if (this.active.length >= 2) return;      // never more than two open decisions
 
     // Theatre-level traffic is SCHEDULED, not entered into the lottery. Left to
     // compete with the subordinates' requests, the fragmentary orders never got
@@ -200,6 +211,29 @@ export class SignalSystem {
      * Every check() is pure — all the state changes live in the choices' apply()
      * handlers — so evaluating all of them and choosing afterwards is safe.
      */
+    /*
+     * A FLOOR BETWEEN SIGNALS, not just a cooldown per kind.
+     *
+     * Per-kind cooldowns bound how often any ONE generator speaks; they say
+     * nothing about how often the player is interrupted, because thirteen
+     * generators each on a patient cooldown still add up. Measured over a
+     * six-hour watch: 5.0 signals an hour, 4.4 of them scored decisions — a
+     * card demanding an answer every thirteen minutes of sim time, which at
+     * 64x compression is one every thirteen SECONDS, each of which drops the
+     * clock to 1x and has to be clicked away. Reported, fairly, as "there are
+     * too many and it's too distracting".
+     *
+     * So the watch gets a guaranteed quiet floor. Something genuinely urgent —
+     * a fresh submarine datum, an aircraft actually at bingo — can cut it
+     * roughly in half, because that is the whole purpose of the urgency field:
+     * the quiet watch stays quiet, and the moment something is wrong you hear
+     * about it.
+     */
+    if (now - w.startedAt < SETTLE) return;
+    const sinceLast = now - (this.lastSignalAt ?? -1e9);
+    if (sinceLast < MIN_GAP * 0.6) return;
+    const gapOpen = sinceLast >= MIN_GAP;
+
     const cand = [];
     for (const gen of GENERATORS) {
       if (!this._ready(gen.kind, now, gen.cooldown)) continue;
@@ -219,6 +253,8 @@ export class SignalSystem {
       if (sig.unit && (this.recentUnit.get(`${gen.kind}:${sig.unit.id}`) ?? -1e9) > now) continue;
       // Never heard from counts as half an hour of silence, so the rare ones
       // start the watch already worth hearing.
+      // Inside the floor, only something urgent gets through.
+      if (!gapOpen && (sig.urgency ?? 1) < 2.6) continue;
       const since = now - (this.lastFired.get(gen.kind) ?? (now - 30 * MIN));
       const weight = (1 + since / (10 * MIN)) * Math.max(0.05, sig.urgency ?? 1);
       cand.push({ gen, sig, weight });
@@ -277,6 +313,11 @@ export class SignalSystem {
       w.emit?.({ type: 'SIGNAL_OPENED', scored: true, sig: s });
     }
     this.log.push(s);
+    // Every signal counts against the quiet floor, whoever sent it. Stamping
+    // this only in the lottery left the scheduled beats and the reactive
+    // pushes free to land on top of one another — measured gaps of 0 and 2
+    // minutes on a watch that was supposed to guarantee eleven.
+    this.lastSignalAt = w.time;
     if (s.needsAnswer) this.active.push(s);
     w.comms.push({
       t: w.time, from: s.from, priority: s.priority, text: s.text,
@@ -495,7 +536,7 @@ export const GENERATORS = [
 
   // ── replenishment ────────────────────────────────────────────────────────
   {
-    kind: 'RAS', cooldown: 25 * MIN,
+    kind: 'RAS', cooldown: 45 * MIN,
     check(sys, w, now) {
       const oiler = w.units.find(u => u.alive && u.side === SIDE.BLUE && u.cls.softHvu);
       if (!oiler) return null;
@@ -536,7 +577,7 @@ export const GENERATORS = [
 
   // ── subsurface contact the escort cannot classify ────────────────────────
   {
-    kind: 'PROSECUTE', cooldown: 14 * MIN,
+    kind: 'PROSECUTE', cooldown: 24 * MIN,
     check(sys, w, now) {
       const table = w.picture(SIDE.BLUE);
       const sub = table.list.find(t => !t.faded && t.domain === DOMAIN.SUBSURFACE
@@ -597,7 +638,7 @@ export const GENERATORS = [
 
   // ── a neutral inside the screen ──────────────────────────────────────────
   {
-    kind: 'NEUTRAL_CLOSE', cooldown: 12 * MIN,
+    kind: 'NEUTRAL_CLOSE', cooldown: 24 * MIN,
     check(sys, w, now) {
       const hvu = w.units.find(u => u.alive && u.hvu);
       if (!hvu) return null;
@@ -859,7 +900,7 @@ export const GENERATORS = [
   // ── an aircraft at bingo ─────────────────────────────────────────────────
   {
     claim(sig) { if (sig.unit) sig.unit._bingoAsked = true; },
-    kind: 'BINGO', cooldown: 8 * MIN,
+    kind: 'BINGO', cooldown: 16 * MIN,
     check(sys, w, now) {
       const a = w.units.find(u => u.alive && u.isAir && u.side === SIDE.BLUE
         && u.maxFuel > 0 && u.fuel / u.maxFuel < 0.22 && !u._bingoAsked);
@@ -898,7 +939,7 @@ export const GENERATORS = [
   // ── battle damage report ─────────────────────────────────────────────────
   {
     claim(sig) { if (sig.unit) sig.unit._bdaAsked = true; },
-    kind: 'BDA', cooldown: 6 * MIN,
+    kind: 'BDA', cooldown: 15 * MIN,
     check(sys, w, now) {
       const u = w.units.find(x => x.alive && x.side === SIDE.BLUE && !x.isAir
         && x.damage.sensors > 0.4 && !x._bdaAsked);
@@ -936,7 +977,7 @@ export const GENERATORS = [
 
   // ── fishing fleet across the base course ─────────────────────────────────
   {
-    kind: 'FISHING', cooldown: 26 * MIN,
+    kind: 'FISHING', cooldown: 50 * MIN,
     check(sys, w, now) {
       const g = w.blueGuide;
       if (!g) return null;
