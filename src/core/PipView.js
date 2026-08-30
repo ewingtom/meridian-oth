@@ -246,15 +246,29 @@ export class PipView {
     // on the contact list — the one panel a player is reading while a missile
     // is inbound. The safe area is measured from the DOM; see Game._pipSafeArea.
     const sa = this.safeArea || { x: 0, y: 0, w: W, h: H };
-    const w = Math.min(440, Math.max(240, sa.w * 0.34));
-    const h = w * (PIP_H / PIP_W);
     const pad = 16;
     const bw = 2;
+    /*
+     * Fit the inset to the space, then put it on the screen.
+     *
+     * The width had a floor of 240 and the safe area had a floor of 200, so
+     * whenever the safe area came out narrow — a small window, a wide contact
+     * list, or a cut opening before the panels have been laid out — the inset
+     * was wider than the box it was being placed in and hung off the left edge
+     * of the screen. Measured at x = -52 with a 240-wide inset: a fifth of the
+     * picture was simply not on the display.
+     */
+    let w = Math.min(440, Math.max(240, sa.w * 0.34));
+    w = Math.min(w, Math.max(120, sa.w - pad * 2), Math.max(120, W - pad * 2));
+    const h = w * (PIP_H / PIP_W);
 
     // Slide in from the right as it fades, so it arrives rather than blinks.
     const slide = (1 - this._opacity) * w * 0.22;
-    const cx = sa.x + sa.w - pad - w * 0.5 + slide;
-    const cy = sa.y + sa.h - pad - h * 0.5;
+    let cx = sa.x + sa.w - pad - w * 0.5 + slide;
+    let cy = sa.y + sa.h - pad - h * 0.5;
+    // Whatever the panels said, the picture belongs on the screen.
+    cx = Math.min(Math.max(cx, w * 0.5 + pad), W - w * 0.5 - pad);
+    cy = Math.min(Math.max(cy, h * 0.5 + pad), H - h * 0.5 - pad);
 
     this.overlayCam.left = 0; this.overlayCam.right = W;
     this.overlayCam.top = 0; this.overlayCam.bottom = H;

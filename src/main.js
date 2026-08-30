@@ -4,6 +4,7 @@ import { RenderPipeline } from './core/renderer.js';
 import { CameraDirector, CAM } from './core/CameraDirector.js';
 import { PipDirector } from './core/PipDirector.js';
 import { SceneView } from './view/SceneView.js';
+import { preloadModels } from './view/UnitView.js';
 import { TacticalOverlay } from './ui/TacticalOverlay.js';
 import { Hud, fmt } from './ui/Hud.js';
 import { GameAudio } from './audio/GameAudio.js';
@@ -113,6 +114,9 @@ class Game {
     this.world.mission = this.mission;
 
     this.view = new SceneView(this.pipeline, this.cam, this.world);
+    // Warm the model cache while the player is still on the menu or the brief.
+    // The first cut to a launch should not be the first time a hull is fetched.
+    preloadModels(this.world.units);
     // The bridge camera places its eye from the ship's own geometry rather than
     // from class numbers — see UnitView._measureBridgeEye.
     this.cam.bridgeEyeFor = (u) => this.view.views.get(u)?.bridgeEye || null;
@@ -242,12 +246,28 @@ class Game {
           // the round, which meant the spectacle cost you the tactical picture
           // at the exact moment you needed it — the reason it was so easy to
           // turn off. It goes in the inset now, so you get both.
-          if (this.autoMissileCam && o.category === 'ASM'
-            && !this._rodeSalvo?.has(o.salvoId)) {
+          /*
+           * Anything worth watching leave the rails, not just anti-ship
+           * missiles: a SAM going up under a raid and a torpedo entering the
+           * water are both moments the player should see. One cut per salvo,
+           * and the director picks between ships that fire together.
+           *
+           * The old cap of 8x was backwards. High compression is exactly when
+           * a launch is missed, so that is when a cut is worth most; it is only
+           * at the extreme end that a five-second shot stops meaning anything.
+           */
+          if (this.autoMissileCam && !this._rodeSalvo?.has(o.salvoId)
+            && ['ASM', 'SAM', 'TORPEDO'].includes(o.category)) {
             this._rodeSalvo = this._rodeSalvo || new Set();
             this._rodeSalvo.add(o.salvoId);
-            if (this.timeScale <= 8) {
-              this.pipDir.offer('LAUNCH', { ord: o, unit: u, from: u, x: o.x, z: o.z, alt: o.alt });
+            if (this.timeScale <= 32) {
+              const salvoSize = this.world.weapons.filter(x => x.alive && x.salvoId === o.salvoId).length;
+              this.pipDir.offerLaunch({
+                ord: o, unit: u, from: u, x: o.x, z: o.z, alt: o.alt,
+                category: o.category, salvoSize,
+                own: u.side === SIDE.BLUE,
+                nearSelection: this.selection.includes(u) || this.selection.length === 0,
+              });
             }
           }
           break;
@@ -1721,7 +1741,10 @@ class Game {
     this.cam.update(dt, this.view.ocean, this.view.elapsed);
     // After the main camera has settled, so the inset's curvature lift is
     // computed against where the main camera actually is this frame.
-    this.pipDir.update(dt);
+    // The director asks for meshes; SceneView streams them the same frame, so
+    // a cut is never composed against a subject that has not been built.
+    this.pipDir.update(dt, this.view);
+    this.view.pinned = this.pipDir.pinned;
     this.view.update(dt, this.world, this.selection);
     this.overlay.selection = this.selection;
     this.overlay.selectedTrack = this.selectedTrack;
@@ -2033,7 +2056,8 @@ async function boot() {
       game.world.step(dt, scale);
       game.mission.step();
       game.cam.update(dt, game.view.ocean, game.view.elapsed);
-      game.pipDir.update(dt);
+      game.pipDir.update(dt, game.view);
+      game.view.pinned = game.pipDir.pinned;
       game.view.update(dt, game.world, game.selection);
       done += dt;
     }

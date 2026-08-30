@@ -35,10 +35,20 @@ import { SIDE } from '../sim/constants.js';
  */
 
 const PRI = { CATSHOT: 2, LAUNCH: 3, INTERCEPT: 4, CIWS: 4, TERMINAL: 5, HIT: 7, SUNK: 9 };
-const DUR = { CATSHOT: 5.5, LAUNCH: 5.0, INTERCEPT: 2.4, CIWS: 2.4, TERMINAL: 6.0, HIT: 3.6, SUNK: 6.5 };
+const DUR = { CATSHOT: 5.5, LAUNCH: 6.5, INTERCEPT: 2.4, CIWS: 2.4, TERMINAL: 6.0, HIT: 3.6, SUNK: 6.5 };
 
 /** A cut may not be pre-empted inside this window, whatever turns up. */
 const MIN_HOLD = 0.9;
+
+/**
+ * How long simultaneous launches are collected before one is chosen. Long
+ * enough to catch a coordinated salvo, short enough that the cut still lands
+ * while the round is leaving the rails.
+ */
+const LAUNCH_GATHER = 0.28;
+
+/** How long a cut may wait for its meshes before it is shown regardless. */
+const WARMUP_CAP = 0.75;
 
 /** Only look ahead this far for a terminal run. */
 const TERMINAL_TTG = 7.0;
@@ -58,6 +68,65 @@ export class PipDirector {
     this._tmp2 = new THREE.Vector3();
     this._seenTerminal = new Set();
     this._scanAcc = 0;
+    /*
+     * What the inset needs meshes for.
+     *
+     * SceneView streams hulls in and out of a "detail bubble" sized from the
+     * MAIN camera — and that bubble is zero once the player zooms past 120 km,
+     * which is where a tactical plot is normally read. So the inset was cutting
+     * to a launch two hundred kilometres away and filming empty ocean: no hull,
+     * and no missile either, because ordnance views are gated by the same
+     * bubble. That is the "pops up and doesn't load" — nothing was ever going
+     * to load, because nothing had been asked for.
+     *
+     * SceneView reads this set every frame and streams whatever is in it
+     * regardless of where the main camera is looking.
+     */
+    this.pinned = new Set();
+    /** True once the subject actually has a mesh, so the cut can be shown. */
+    this.ready = false;
+    this._warm = 0;
+  }
+
+  /*
+   * Launches arrive in clusters — a coordinated salvo means three ships firing
+   * inside the same second, and whichever one the event loop happened to reach
+   * first used to win the window. So launches are not cut immediately: they are
+   * collected for a beat and the best of them is chosen.
+   *
+   * The pause is doing a second job. It is also warm-up time for the streamer,
+   * so by the time the cut opens the hull and the round are built.
+   */
+  offerLaunch(cand) {
+    if (!this.enabled) return;
+    if (this.shot && PRI[this.shot.kind] > PRI.LAUNCH) return;
+    this._launchQ = this._launchQ || [];
+    this._launchQ.push(cand);
+    if (this._launchT === undefined || this._launchT === null) this._launchT = 0;
+  }
+
+  _flushLaunches() {
+    const q = this._launchQ;
+    if (!q || !q.length) return;
+    /*
+     * Pick the one worth watching. A big salvo beats a single round, our own
+     * ships beat theirs — the player has more invested in what they ordered —
+     * and a round already being fired at is more interesting than one that is
+     * not. Ties go to the round nearest what the player has selected.
+     */
+    let best = null, bestScore = -1e9;
+    for (const c of q) {
+      let sc = (c.salvoSize || 1) * 2;
+      if (c.own) sc += 6;
+      if (c.category === 'ASM') sc += 5;
+      else if (c.category === 'TORPEDO') sc += 4;
+      else if (c.category === 'SAM') sc += 2;
+      if (c.nearSelection) sc += 3;
+      if (sc > bestScore) { bestScore = sc; best = c; }
+    }
+    this._launchQ = null;
+    this._launchT = null;
+    if (best) this.offer('LAUNCH', best);
   }
 
   /** An event worth filming. Returns true if it took the window. */
@@ -72,7 +141,35 @@ export class PipDirector {
     this.t = 0;
     this._eyeInit = false;
     this._fovS = 0;
-    this.pip.active = true;
+    /*
+     * Ask for the meshes NOW, and do not put the inset on screen until they
+     * exist. A cut that opens on an empty sea and fills in half a second later
+     * is worse than no cut: the player looks at the moment the thing they were
+     * meant to see has already happened.
+     */
+    this.pinned.clear();
+    if (unit) this.pinned.add(unit);
+    if (from) this.pinned.add(from);
+    if (ord) this.pinned.add(ord);
+    if (ord?.truth) this.pinned.add(ord.truth);
+    this.ready = false;
+    this._warm = 0;
+    return true;
+  }
+
+  /** Has the scene actually built what this shot is pointed at? */
+  _subjectReady(view) {
+    if (!view) return true;                    // no view layer to wait on
+    const s = this.shot;
+    if (!s) return false;
+    const need = s.unit || s.from;
+    if (need && need.alive !== false) {
+      const v = view.views?.get(need);
+      // A view exists as a grey placeholder box the moment it is created; what
+      // we are waiting for is the real hull.
+      if (!v || !v.ready || v.placeholder) return false;
+    }
+    if (s.ord && s.ord.alive && !view.ordViews?.has(s.ord)) return false;
     return true;
   }
 
@@ -107,14 +204,33 @@ export class PipDirector {
     if (this._seenTerminal.size > 400) this._seenTerminal.clear();
   }
 
-  update(dt) {
-    if (!this.enabled) { this.pip.active = false; return; }
+  update(dt, view = null) {
+    if (!this.enabled) { this.pip.active = false; this.pinned.clear(); return; }
+    if (this._launchT !== null && this._launchT !== undefined) {
+      this._launchT += dt;
+      if (this._launchT >= LAUNCH_GATHER) this._flushLaunches();
+    }
     this._scanTerminal(dt);
 
     const s = this.shot;
-    if (!s) { this.pip.active = false; return; }
+    if (!s) { this.pip.active = false; this.pinned.clear(); return; }
+
+    /*
+     * Warm-up. The shot is framed and the meshes are requested, but the inset
+     * stays off screen until they are actually there — or until the warm-up
+     * cap runs out, because a cut that never opens is also a failure. The
+     * clock on the shot itself does not start until it is visible, so the
+     * player always gets the full duration of whatever they are shown.
+     */
+    if (!this.ready) {
+      this._warm += dt;
+      this._frame(s, dt);                      // frame it anyway, so it is composed
+      if (this._subjectReady(view) || this._warm > WARMUP_CAP) this.ready = true;
+      else { this.pip.active = false; return; }
+    }
+
     this.t += dt;
-    if (this.t > s.dur) { this.shot = null; this.pip.active = false; return; }
+    if (this.t > s.dur) { this.shot = null; this.pip.active = false; this.pinned.clear(); return; }
 
     this.pip.active = true;
     this._frame(s, dt);

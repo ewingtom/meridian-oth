@@ -659,6 +659,13 @@ export class SceneView {
     // symbol either way — so streaming its full model in cost five hundred draw
     // calls at the tactical zoom for nothing anyone could see.
     const bubble = this.bubble;
+    /*
+     * Whatever the picture-in-picture is filming gets a mesh regardless of
+     * where the main camera is. The bubble is sized from the main camera and
+     * is ZERO past 120 km of zoom, which is where a tactical plot is normally
+     * read — so the inset used to cut to a launch and film open water.
+     */
+    const pinned = this.pinned || null;
     const fx = cam.focus.x, fz = cam.focus.y;
     const camSimX = cam.origin.x + camera.position.x;
     const camSimZ = cam.origin.y + camera.position.z;
@@ -676,6 +683,11 @@ export class SceneView {
         const dCam = Math.hypot(u.x - camSimX, u.z - camSimZ);
         if (dCam > (u.cls.length || 120) * 280) continue;
         wanted.add(u);
+      }
+    }
+    if (pinned) {
+      for (const p of pinned) {
+        if (p && p.cls && (p.alive || (p.sunkAt && world.time - p.sunkAt <= 50))) wanted.add(p);
       }
     }
     for (const [u, v] of this.views) {
@@ -849,7 +861,10 @@ export class SceneView {
       if (!o.alive) continue;
       const d = Math.hypot(o.x - cam.focus.x, o.z - cam.focus.y);
       const bubble = Math.max(this.bubble, cam.mode === 'MISSILE' ? 200000 : 0);
-      if (bubble <= 0 || d > bubble * 1.4) continue;
+      // Same rule for rounds in the air: a launch the inset is filming needs
+      // its missile drawn even when the plot is zoomed out past the bubble.
+      const pin = this.pinned && this.pinned.has(o);
+      if (!pin && (bubble <= 0 || d > bubble * 1.4)) continue;
       live.add(o);
       let v = this.ordViews.get(o);
       if (!v) { v = this._makeOrdView(o); this.ordViews.set(o, v); }

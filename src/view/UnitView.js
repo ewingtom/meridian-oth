@@ -44,6 +44,31 @@ const AIRCRAFT_MODELS = {
   MPA_BEAR: 'aircraft_bear',
   BOMBER_BACKFIRE: 'aircraft_backfire',
 };
+/**
+ * Warm the model cache for everything a scenario actually contains.
+ *
+ * loadModel() caches per file, so the first ship of a class to need a mesh pays
+ * the fetch and the parse. That is invisible while the player is reading a
+ * briefing, and very visible when the picture-in-picture cuts to a launch and
+ * has to wait on the network — the cut opens on a grey placeholder box or an
+ * empty sea. Fetching them up front costs nothing anyone can see.
+ */
+export function preloadModels(units) {
+  const files = new Set(['missile_asm']);
+  for (const u of units) {
+    const cls = u.cls || u;
+    if (!cls) continue;
+    const air = AIRCRAFT_MODELS[cls.id];
+    if (air) files.add(air);
+    else if (cls.model) files.add(cls.model);
+    for (const a of cls.aircraft || []) {
+      const m = AIRCRAFT_MODELS[a.type];
+      if (m) files.add(m);
+    }
+  }
+  return Promise.all([...files].map(f => loadModel(f).catch(() => null)));
+}
+
 const _preparing = new Map();
 const _missing = new Set();
 
