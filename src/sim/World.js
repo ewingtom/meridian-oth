@@ -39,6 +39,9 @@ export class World {
       radarFactor: 1.0,
       acousticFactor: 1.0,
       czRange: 55000,
+      // Depth of the thermocline, and how sharp it is. See layerFactor().
+      layerDepth: 85,
+      layerStrength: 1.0,
       name: 'MODERATE SEA — GOOD VISIBILITY',
     };
     this._applyWeather();
@@ -115,6 +118,15 @@ export class World {
     w.radarFactor = clamp(1.05 - ss * 0.045, 0.6, 1.05);
     // A rough sea is a wall of noise: passive sonar ranges collapse.
     w.acousticFactor = clamp(1.25 - ss * 0.13, 0.4, 1.25);
+    /*
+     * The layer. A rough sea mixes the top of the water column, which pushes
+     * the boundary deeper and blunts it; a calm sunlit sea leaves a shallow,
+     * knife-sharp one. So heavy weather is bad for passive sonar in general and
+     * simultaneously takes away the submarine's best hiding place — which is
+     * the sort of trade this game should be making the player think about.
+     */
+    w.layerDepth = clamp(45 + ss * 17, 40, 150);
+    w.layerStrength = clamp(1.25 - ss * 0.14, 0.35, 1.25);
     w.windSpeed = 3 + ss * 3.1;
     w.name = ss <= 2 ? 'CALM — EXCELLENT VISIBILITY'
       : ss <= 3 ? 'MODERATE SEA — GOOD VISIBILITY'

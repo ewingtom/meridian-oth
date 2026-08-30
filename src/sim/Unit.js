@@ -132,6 +132,24 @@ export class Unit {
     return sensor.height || this.cls.mastHeight || 20;
   }
 
+  /**
+   * How deep this sonar is listening, in metres. The whole point of a towed
+   * array or a dipping set is that it is streamed BELOW the layer while the
+   * ship stays on top of it — so this cannot be one number per platform.
+   */
+  sonarDepth(sensor, layerDepth = 85) {
+    if (sensor.towed) return layerDepth + 45;          // streamed deep, on purpose
+    if (sensor.dipping) return this.dipDeep ? layerDepth + 40 : Math.min(60, layerDepth - 10);
+    if (this.isSub) return Math.max(0, -this.alt);     // the boat's own depth
+    if (this.isAir) return 25;                         // a buoy hanging under a float
+    return 12;                                         // hull array, under the keel
+  }
+
+  /** Depth of this unit as an ACOUSTIC target. Surface ships sit at the top. */
+  get acousticDepth() {
+    return this.isSub ? Math.max(0, -this.alt) : 6;
+  }
+
   /** The height a hostile sensor "sees" of this unit. */
   get signatureHeight() {
     if (this.isAir) return Math.max(10, this.alt);

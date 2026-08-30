@@ -1,5 +1,6 @@
 import {
   radarHorizon, DOMAIN, IDENT, SIDE, clamp, D2R, Rng,
+  layerFactor,
 } from './constants.js';
 
 /*
@@ -350,10 +351,23 @@ export class SensorSystem {
     const acoustic = isWeapon ? (t.acoustic || 2.2) : t.acoustic;
     const layer = this.world.weather.acousticFactor;
 
+    /*
+     * THE LAYER. Until now sonar had no idea how deep anything was: a hull
+     * array at twelve metres performed identically against a boat at twenty
+     * and a boat at three hundred, which made a submarine's depth a number
+     * that gated the datalink and nothing else. It is now the decision it
+     * should be — and the reason a towed array exists, because it is streamed
+     * below the boundary while the ship stays above it.
+     */
+    const wx = this.world.weather;
+    const sDepth = u.sonarDepth(s, wx.layerDepth);
+    const tDepth = isWeapon ? 30 : t.acousticDepth;
+    const lf = layerFactor(sDepth, tDepth, wx.layerDepth, wx.layerStrength);
+
     // Passive
     if ((s.mode === 'PASSIVE' || s.mode === 'DUAL') && s.passiveRange) {
       const selfNoise = s.towed ? Math.max(u.sonarSelfNoiseFactor, 0.5) : u.sonarSelfNoiseFactor;
-      let rmax = s.passiveRange * Math.pow(Math.max(0.02, acoustic / REF_ACOUSTIC), 0.55) * selfNoise * layer;
+      let rmax = s.passiveRange * Math.pow(Math.max(0.02, acoustic / REF_ACOUSTIC), 0.55) * selfNoise * layer * lf;
       let pd = 0;
       if (range < rmax) {
         pd = 1 / (1 + Math.pow(range / (rmax * 0.8), 7));
@@ -393,7 +407,7 @@ export class SensorSystem {
     // Active
     if ((s.mode === 'ACTIVE' || s.mode === 'DUAL') && s.activeRange && (u.activeSonar || s.dipping)) {
       const ts = isWeapon ? 0.4 : (t.isSub ? 1.0 : 2.4);
-      const rmax = s.activeRange * Math.pow(ts, 0.25) * layer;
+      const rmax = s.activeRange * Math.pow(ts, 0.25) * layer * lf;
       if (range < rmax) {
         const pd = 1 / (1 + Math.pow(range / (rmax * 0.85), 8));
         const trk = this._contact(u, t, table, now, pd, dt, s.scan || 6);

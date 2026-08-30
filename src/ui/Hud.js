@@ -169,7 +169,8 @@ export class Hud {
     const visNm = w.weatherSys ? w.weatherSys.state.visNm : (w.weather.visFactor * 26000) / NM;
     const rain = (w.weather.rain || 0) > 0.25 ? ' · RAIN' : '';
     $('env-readout').textContent =
-      `SS${Math.round(w.weather.seaState)} · VIS ${Math.round(visNm)} NM · DUCT ${w.sensors.duct.toFixed(2)}×${rain}`;
+      `SS${Math.round(w.weather.seaState)} · VIS ${Math.round(visNm)} NM · DUCT ${w.sensors.duct.toFixed(2)}×`
+      + ` · LAYER ${Math.round(w.weather.layerDepth)} M${rain}`;
 
     for (const b of $('tc').children) b.classList.toggle('on', +b.dataset.scale === g.timeScale);
     for (const b of $('gfx').children) b.classList.toggle('on', b.dataset.q === g.quality);
@@ -771,8 +772,14 @@ export class Hud {
         rowD.appendChild(b);
       }
       gD.appendChild(rowD);
+      const layerM = this.game.world.weather.layerDepth;
+      const below = -u.alt > layerM;
       gD.appendChild(el('div', 'sel-sub', u.isSub
-        ? `${Math.round(-u.alt)} m keel · ${u.deep ? 'DEEP — off the link' : 'shallow — link and ESM available'}`
+        ? `${Math.round(-u.alt)} m keel · layer at ${Math.round(layerM)} m — `
+          + (below
+            ? 'BELOW: surface hull arrays lose most of their range on you'
+            : 'above: in the surface duct, where their hull sonar hears best')
+          + ` · ${u.deep ? 'off the link' : 'link and ESM available'}`
         : `${fmt.alt(u.alt)} · radar horizon ${fmt.nm(radarHorizon(Math.max(10, u.alt), 24))}`));
       body.appendChild(gD);
     }

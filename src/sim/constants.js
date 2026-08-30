@@ -37,6 +37,48 @@ export function radarHorizon(hs, ht) {
   return 4120 * (Math.sqrt(Math.max(0.5, hs)) + Math.sqrt(Math.max(0.5, ht)));
 }
 
+/**
+ * THE LAYER.
+ *
+ * Sea water is not one medium. Sun warms the top of it, and somewhere between
+ * thirty and a hundred and fifty metres down the temperature falls off a cliff.
+ * Sound crossing that boundary refracts hard downward, so a sensor on one side
+ * of it hears very little of what is on the other — which is the single most
+ * important fact in submarine warfare, and the reason a submarine's first
+ * question is what depth to take.
+ *
+ * A destroyer's hull array hangs a few metres under the keel, well ABOVE the
+ * layer. Go below it and she loses most of her range on you. That is why a
+ * towed array exists at all: it is streamed deep specifically so the ship has
+ * an ear on the far side of the boundary, and why a helicopter's dipping sonar
+ * can be lowered through it.
+ *
+ * Returns a multiplier on detection range.
+ *   - same side of the layer: full range, and slightly better in the surface
+ *     duct where sound is trapped and bounces along
+ *   - opposite sides: a hard cut
+ *
+ * `strength` is how sharp the boundary is — a well-mixed winter sea barely has
+ * one, a calm sunlit summer sea has a very sharp one.
+ */
+export function layerFactor(sensorDepth, targetDepth, layerDepth, strength = 1) {
+  const sBelow = sensorDepth > layerDepth;
+  const tBelow = targetDepth > layerDepth;
+  if (sBelow !== tBelow) {
+    // Crossing it. A sharp layer can take three quarters of your range.
+    const cut = 0.62 * strength;
+    // The cut eases if either party is sitting right at the boundary, where
+    // some energy still leaks across.
+    const near = Math.min(Math.abs(sensorDepth - layerDepth), Math.abs(targetDepth - layerDepth));
+    const ease = clamp(1 - near / 90, 0, 1) * 0.45;
+    return clamp(1 - cut * (1 - ease), 0.16, 1);
+  }
+  // Both above: the surface duct carries sound further than open water.
+  if (!sBelow) return 1 + 0.18 * strength;
+  // Both below: the deep sound channel, quieter and steadier still.
+  return 1 + 0.10 * strength;
+}
+
 /** EMCON postures, most restrictive first. */
 export const EMCON = {
   SILENT: 'SILENT',       // nothing radiates. Passive sensors only.

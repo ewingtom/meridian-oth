@@ -213,7 +213,9 @@ export class Encyclopedia {
     } else if (s.type === 'SONAR') {
       if (s.passiveRange) bits.push(`passive: <b>${rng(s.passiveRange)}</b>`);
       if (s.activeRange) bits.push(`active: <b>${rng(s.activeRange)}</b> (emits)`);
-      if (s.towed) bits.push('towed — below the layer');
+      bits.push(s.towed
+        ? 'streamed BELOW the layer — the reason it exists'
+        : (p.domain === 'SUBSURFACE' ? "at the boat's own depth" : 'hull-mounted, above the layer'));
     } else if (s.type === 'VISUAL') {
       bits.push(`<b>${rng(Math.min(s.refRange, radarHorizon(h, REF_SHIP.height)))}</b> in clear weather`);
     }

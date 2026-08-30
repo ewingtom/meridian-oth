@@ -181,6 +181,9 @@ export class WeatherSystem {
     wx.visFactor = clamp((s.visNm * NM) / 26000, 0.10, 1.35);
     wx.radarFactor = clamp(1.05 - s.seaState * 0.045 - s.rain * 0.22, 0.45, 1.05);
     wx.acousticFactor = clamp(1.25 - s.seaState * 0.13, 0.35, 1.25);
+    // Weather moves the layer: a mixed sea pushes it deeper and blunts it.
+    wx.layerDepth = clamp(45 + s.seaState * 17, 40, 150);
+    wx.layerStrength = clamp(1.25 - s.seaState * 0.14, 0.35, 1.25);
     wx.windSpeed = windSpd;
     wx.name = s.name;
     wx.rain = s.rain;
