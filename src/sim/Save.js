@@ -109,6 +109,10 @@ const TRACK_SCALARS = [
   'identityLocked', 'fingerprint', 'linked', 'linkAge', 'threat', 'lostAt',
   'faded', 'strength', 'newFlag', 'speedEst', 'courseEst', 'everWeaponsQuality',
   'assigned', 'silentSince',
+  // Without this a restored track has measured === undefined, _refresh()
+  // forces tq to 0, and any round in flight on a coasting track silently
+  // loses its midcourse updates at the TQ3 gate in Ordnance.js.
+  'measured',
 ];
 
 function saveTrack(t) {

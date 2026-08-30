@@ -346,9 +346,9 @@ export const SCENARIOS = [
     ],
     objectivePoint: { x: -20000, z: -140000, name: 'STATION KILO', radius: 50000 },
     objectives: [
-      { id: 'SURVIVE', text: 'Both high value units survive the raid', key: true,
+      { id: 'SURVIVE', text: 'Both high value units survive the raid', key: true, negative: true,
         check: (w, m, c) => c.hvus.length > 0 && c.hvus.every(u => u.alive) },
-      { id: 'LEAKERS', text: 'Stop the first salvo — no leakers reach the HVUs',
+      { id: 'LEAKERS', text: 'Stop the first salvo — no leakers reach the HVUs', negative: true,
         check: (w, m, c) => c.hvus.every(u => u.hp >= u.maxHp * 0.999) },
       { id: 'COUNTER', text: 'Hit back — destroy two hostile combatants',
         check: (w, m, c) => c.redSurface.filter(u => !u.alive).length >= 2 },

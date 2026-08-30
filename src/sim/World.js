@@ -220,6 +220,7 @@ export class World {
           t.alt = u.alt; t.sigma = 25; t.tq = 6; t.lastUpdate = now;
           t.P[0] = 625; t.P[5] = 625;
         }
+        t.measured = true;
         t.identity = IDENT.FRIEND;
         t.identityLocked = true;
         t.classification = u.cls.display;
