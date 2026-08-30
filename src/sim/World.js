@@ -371,6 +371,39 @@ export class World {
     }
   }
 
+  /**
+   * A destroyed contact stops being a contact.
+   *
+   * Nothing used to clear a track when its truth died: the symbol simply
+   * stopped being updated, so it sat on the plot at full quality for about two
+   * minutes and then decayed out over another ten — all while the comms channel
+   * had already reported "confirmed kill". The player was told it was dead and
+   * shown that it wasn't.
+   *
+   * The track is dropped only for a side that was actually HOLDING it when it
+   * died. A kill you had no sensor on does not quietly confirm itself, and a
+   * stale track on something that sank an hour ago is a real and useful mistake
+   * to be able to make — it just should not be the normal case for a target you
+   * were watching at the moment it blew up.
+   */
+  _dropTracksOn(u, now) {
+    for (const side of [SIDE.BLUE, SIDE.RED]) {
+      const table = this.tables[side];
+      const t = table.find(u.id);
+      if (!t || t.own) continue;
+      // Held means: we had it, and it had not already gone stale on us.
+      const held = !t.faded && (now - t.lastUpdate) < 180;
+      if (!held) continue;
+      table.remove(u.id);
+      if (side === SIDE.BLUE) {
+        this.comms.push({
+          t: now, from: 'TF-44 OPS', priority: 'ROUTINE',
+          text: `${t.id} drops from the plot — target destroyed.`,
+        });
+      }
+    }
+  }
+
   _reap(now) {
     for (const u of this.units) {
       if (u.alive || u._reaped) continue;
@@ -380,6 +413,7 @@ export class World {
       const list = u.side === SIDE.BLUE ? this.stats.blueLosses
         : u.side === SIDE.RED ? this.stats.redLosses : this.stats.neutralLosses;
       list.push({ id: u.id, name: u.name, cls: u.cls.display, t: now, by: u._lastHitBy || 'UNKNOWN' });
+      this._dropTracksOn(u, now);
       this.emit({ type: 'SUNK', unit: u });
       if (u.side === SIDE.BLUE) {
         this.comms.push({ t: now, from: 'TF-44 OPS', priority: 'FLASH', text: `${u.name} is lost. All hands, search and rescue.` });
