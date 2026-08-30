@@ -142,6 +142,9 @@ export class TacticalOverlay {
   draw(dt) {
     const ctx = this.ctx;
     this.time += dt;
+    // Real seconds, for the display smoother — see _view().
+    this._lastDt = Math.min(0.1, dt || 0.016);
+    if (!this._viewPos) this._viewPos = new Map();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, this.w, this.h);
     this.pickables.length = 0;
@@ -761,6 +764,34 @@ export class TacticalOverlay {
   }
 
   // ── track symbology ───────────────────────────────────────────────────────
+  /**
+   * Where to DRAW a track, as opposed to where the filter believes it is.
+   *
+   * A bearing-only contact's estimate legitimately swings kilometres every time
+   * a new cut arrives from a different receiver — measured at 3.6 km average and
+   * 10.5 km peak per ten seconds, for ships actually making 70 m in that time.
+   * That is the triangulation working, and the error ellipse already says so.
+   * But a symbol that teleports across the plot reads as a rendering glitch
+   * rather than as uncertainty, which is how it was reported.
+   *
+   * So the symbol is eased toward the estimate in REAL time — a display concern,
+   * kept out of the sim, and in real time because a constant in sim-seconds
+   * would vanish at 64x compression, which is exactly when the plot is busiest.
+   * Weapons, targeting and every gate still read t.x/t.z; only the drawing lags.
+   * A genuine re-seed jumps too far to ease across, so those snap.
+   */
+  _view(t, dt) {
+    let v = this._viewPos.get(t.id);
+    if (!v) { v = { x: t.x, z: t.z }; this._viewPos.set(t.id, v); }
+    const d = Math.hypot(t.x - v.x, t.z - v.z);
+    if (d > 45000) { v.x = t.x; v.z = t.z; return v; }   // re-seed: snap, don't slide
+    // ~0.4 s to close most of the gap; fast enough to never feel laggy.
+    const k = 1 - Math.exp(-dt / 0.4);
+    v.x += (t.x - v.x) * k;
+    v.z += (t.z - v.z) * k;
+    return v;
+  }
+
   _drawTracks(ctx, chart, mpp) {
     const table = this.world.picture(SIDE.BLUE);
     if (!table) return;
@@ -772,7 +803,8 @@ export class TacticalOverlay {
       for (const t of list) {
         if (t.own || t.faded || !t.ellipse) continue;
         if (t.tq >= 5) continue;
-        const p = this.project(t.x, t.z, 0);
+        const ev = this._view(t, this._lastDt);
+        const p = this.project(ev.x, ev.z, 0);
         if (!p) continue;
         const rMaj = (t.ellipse.major * 2) / mpp;
         const rMin = (t.ellipse.minor * 2) / mpp;
@@ -800,7 +832,10 @@ export class TacticalOverlay {
       if (t.faded && now - t.lastUpdate > 900) continue;
       const isAir = t.domain === DOMAIN.AIR;
       const alt = isAir ? Math.max(0, t.alt) : 0;
-      const p = this.project(t.x, t.z, alt);
+      // Own units report their own position and never jitter; only estimates
+      // are smoothed, so our own force stays exactly where it is.
+      const vp = t.own ? t : this._view(t, this._lastDt);
+      const p = this.project(vp.x, vp.z, alt);
       if (!p) continue;
       if (p.x < -80 || p.x > this.w + 80 || p.y < -80 || p.y > this.h + 80) continue;
       if (t.domain === DOMAIN.MISSILE || t.domain === DOMAIN.TORPEDO) continue;  // drawn with ordnance
@@ -819,7 +854,7 @@ export class TacticalOverlay {
       // Air symbols float above the surface with a drop line, exactly as on a
       // real plot, so an aircraft never gets confused with the ship beneath it.
       if (isAir && alt > 100) {
-        const base = this.project(t.x, t.z, 0);
+        const base = this.project(vp.x, vp.z, 0);
         if (base) {
           ctx.strokeStyle = this._alpha(col, 0.35);
           ctx.lineWidth = 1;
@@ -842,8 +877,8 @@ export class TacticalOverlay {
         // orbits, every course vector on the display points somewhere the
         // contact is not going — which is worse than having no vector at all.
         const RUN = 360;                       // six minutes at present speed
-        const q = this.project(t.x + Math.sin(crs) * spd * RUN,
-                               t.z + Math.cos(crs) * spd * RUN, alt);
+        const q = this.project(vp.x + Math.sin(crs) * spd * RUN,
+                               vp.z + Math.cos(crs) * spd * RUN, alt);
         if (q) {
           const dx = q.x - p.x, dy = q.y - p.y;
           const len = Math.hypot(dx, dy);

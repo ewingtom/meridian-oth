@@ -593,6 +593,33 @@ class Game {
       else if (hit.track) this.selectTrack(hit.track);
       return;
     }
+
+    /*
+     * SELECT A UNIT, CLICK THE SEA, IT GOES THERE.
+     *
+     * This is the one thing everybody tries first, and until now it did the
+     * opposite: a click on open water cleared the selection, so the intuitive
+     * gesture threw away the thing you had just selected. Moving a ship
+     * required either arming a mode first or knowing to use the right button —
+     * neither of which is discoverable, and one of which does not exist on a
+     * trackpad.
+     *
+     * Escape still clears the selection, and clicking another unit still
+     * selects it, so nothing is lost by making the empty-water click mean the
+     * order the player was trying to give.
+     */
+    if (sea && this.selection.length) {
+      for (const u of this.selection) u.orderWaypoint(sea.x, sea.z, { append: e.shiftKey });
+      this.audio.ui('confirm');
+      const lead = this.selection[0];
+      this.world.comms.push({
+        t: this.world.time, from: lead.name, priority: 'ROUTINE',
+        text: this.selection.length > 1
+          ? `${this.selection.length} units coming to new course.`
+          : (e.shiftKey ? 'Waypoint added.' : 'Coming to new course.'),
+      });
+      return;
+    }
     if (!e.shiftKey) { this.selection = []; this.selectedTrack = null; }
   }
 
@@ -1247,9 +1274,10 @@ class Game {
       </div>
       <h3 style="margin-top:20px">COMMAND</h3>
       <div class="legend">
-        <div><b>Click</b> select unit or contact</div><div><b>Double-click</b> go to it — ship, contact or missile</div>
+        <div><b>Click a unit</b> select it</div><div><b>Then click the sea</b> it goes there</div>
+        <div><b>Double-click</b> go to it — ship, contact or missile</div><div><b>Esc</b> clear the selection</div>
         <div><b>Shift + drag</b> box-select several</div><div><b>Double-click sea</b> zoom in there</div>
-        <div><b>Right-click sea</b> steer there</div><div><b>Shift + click</b> queue waypoints</div>
+        <div><b>Right-click sea</b> steer there (same thing)</div><div><b>Shift + click</b> queue waypoints</div>
         <div><b>1 2 3 4</b> EMCON alpha → delta</div><div><b>E</b> engage designated track</div>
         <div><b>G</b> set course mode</div><div><b>Space</b> pause · number keys on the bar for time</div>
         <div><b>T</b> toggle kill web</div><div><b>R</b> toggle sensor rings</div>

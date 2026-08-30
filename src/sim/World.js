@@ -1,4 +1,4 @@
-import { SIDE, EMCON, ROE, DOMAIN, IDENT, clamp, NM, KNOT, Rng, WEAPONS_QUALITY_TQ } from './constants.js';
+import { SIDE, EMCON, ROE, DOMAIN, IDENT, clamp, NM, KNOT, Rng, WEAPONS_QUALITY_TQ, tqFromSigma } from './constants.js';
 import { Unit } from './Unit.js';
 import { TrackTable } from './Tracks.js';
 import { SensorSystem } from './Sensors.js';
@@ -219,6 +219,35 @@ export class World {
           t.x = u.x; t.z = u.z; t.vx = Math.sin(u.heading) * u.speed; t.vz = Math.cos(u.heading) * u.speed;
           t.alt = u.alt; t.sigma = 25; t.tq = 6; t.lastUpdate = now;
           t.P[0] = 625; t.P[5] = 625;
+          t.lastReport = now;
+        } else {
+          /*
+           * DEAD RECKONING, not filter decay.
+           *
+           * A unit under EMCON silence used to be left to coast on its Kalman
+           * estimate, which coasts toward nothing in particular: measured 88 km
+           * of error after five minutes silent and 211 km after fifteen, and
+           * then the symbol SNAPPED back to truth the moment the unit rejoined
+           * the link. Ordering a silent aircraft to search an area puts it back
+           * on the link, so the snap landed exactly on the order — reported as
+           * "I ordered it to search an area and it just jumped there".
+           *
+           * Nobody loses their own aircraft by two hundred kilometres. A silent
+           * consort is not an unknown contact: the force knows the course and
+           * speed it was ordered to hold, and that is what dead reckoning is.
+           * So the position stays good and only the CONFIDENCE decays, which
+           * shows as a growing ellipse — the honest cost of going quiet —
+           * instead of a symbol wandering off the plot.
+           */
+          t.x = u.x; t.z = u.z;
+          t.vx = Math.sin(u.heading) * u.speed; t.vz = Math.cos(u.heading) * u.speed;
+          t.alt = u.alt;
+          t.lastUpdate = now;
+          const stale = now - (t.lastReport ?? now);
+          const err = Math.min(3500, 90 + stale * 1.2);
+          t.sigma = err;
+          t.P[0] = err * err; t.P[5] = err * err;
+          t.tq = tqFromSigma(err);
         }
         t.measured = true;
         t.identity = IDENT.FRIEND;
